@@ -1,0 +1,29 @@
+# Build artifacts
+crew.exe
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Config (secrets)
+codecrew.json
+~/.codecrew/config.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temp
+*.tmp
+*.temp

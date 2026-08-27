@@ -1,0 +1,30 @@
+{
+  "model": "deepseek/deepseek-chat",
+  "providers": {
+    "deepseek": {
+      "base_url": "https://api.deepseek.com",
+      "api_key": "sk-在这里填你的DeepSeek密钥",
+      "models": ["deepseek-chat", "deepseek-reasoner"]
+    },
+    "qwen": {
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "api_key": "sk-在这里填你的通义密钥",
+      "models": ["qwen-coder-plus", "qwen-max"]
+    },
+    "kimi": {
+      "base_url": "https://api.moonshot.cn/v1",
+      "api_key": "sk-在这里填你的Kimi密钥",
+      "models": ["moonshot-v1-32k", "kimi-k2-0711-preview"]
+    },
+    "glm": {
+      "base_url": "https://open.bigmodel.cn/api/paas/v4",
+      "api_key": "在这里填你的智谱密钥",
+      "models": ["glm-4.7"]
+    },
+    "openai": {
+      "base_url": "https://api.openai.com/v1",
+      "api_key": "sk-在这里填你的OpenAI密钥",
+      "models": ["gpt-5-mini", "gpt-5"]
+    }
+  }
+}
