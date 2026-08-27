@@ -1,5 +1,7 @@
 {
+  "//": "复制为 codecrew.json 后填入自己的密钥；codecrew.json 已在 .gitignore 中，不会被提交",
   "model": "deepseek/deepseek-chat",
+
   "providers": {
     "deepseek": {
       "base_url": "https://api.deepseek.com",
@@ -9,7 +11,7 @@
     "qwen": {
       "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
       "api_key": "sk-在这里填你的通义密钥",
-      "models": ["qwen-coder-plus", "qwen-max"]
+      "models": ["qwen3-coder-plus", "qwen-max"]
     },
     "kimi": {
       "base_url": "https://api.moonshot.cn/v1",
@@ -25,6 +27,29 @@
       "base_url": "https://api.openai.com/v1",
       "api_key": "sk-在这里填你的OpenAI密钥",
       "models": ["gpt-5-mini", "gpt-5"]
+    },
+    "ollama": {
+      "base_url": "http://localhost:11434/v1",
+      "api_key": "ollama",
+      "models": ["qwen2.5-coder:7b", "deepseek-r1:7b"]
     }
-  }
+  },
+
+  "//permissions": "allow 直接放行 / ask 每次询问 / deny 拒绝；* 是兜底，也可用 /allow <tool> 临时放行",
+  "permissions": {
+    "bash": "ask",
+    "write": "ask",
+    "edit": "ask",
+    "read": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "plan": "allow"
+  },
+
+  "//context": "max_context_tokens 超过后自动压缩历史；max_tool_rounds 限制单轮对话的工具调用次数",
+  "max_context_tokens": 24000,
+  "max_tool_rounds": 12,
+
+  "//working_dir": "可选：工具读写与命令执行的根目录，默认取当前目录，也可用 --cwd 或 CREW_WORKING_DIR 指定",
+  "working_dir": ""
 }

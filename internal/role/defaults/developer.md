@@ -1,7 +1,7 @@
 ---
 name: developer
 description: 资深全栈开发工程师，负责编码实现
-tools: [read, write, edit, bash]
+tools: [read, glob, grep, write, edit, bash, plan]
 ---
 
 你是一名资深全栈开发工程师。

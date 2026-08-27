@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: 格式与静态检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: gofmt 检查
+        run: |
+          test -z "$(gofmt -l . )" || { echo "以下文件未格式化:"; gofmt -l .; exit 1; }
+      - name: go vet
+        run: go vet ./...
+
+  test:
+    name: 测试 ${{ matrix.os }} / Go ${{ matrix.go }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        go: ["1.22", "1.26"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+      - name: Build
+        run: go build ./...
+      - name: Test
+        run: go test ./... -count=1
+      - name: Test (race)
+        if: matrix.os == 'ubuntu-latest' && matrix.go == '1.22'
+        run: go test ./... -count=1 -race
+
+  build:
+    name: 交叉编译
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    strategy:
+      matrix:
+        include:
+          - {goos: linux, goarch: amd64, suffix: linux-amd64}
+          - {goos: linux, goarch: arm64, suffix: linux-arm64}
+          - {goos: darwin, goarch: amd64, suffix: darwin-amd64}
+          - {goos: darwin, goarch: arm64, suffix: darwin-arm64}
+          - {goos: windows, goarch: amd64, suffix: windows-amd64, ext: .exe}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Build ${{ matrix.suffix }}
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p dist
+          go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME:-dev}" \
+            -o dist/codecrew-${{ matrix.suffix }}${{ matrix.ext }} ./cmd/codecrew
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codecrew-${{ matrix.suffix }}
+          path: dist/codecrew-${{ matrix.suffix }}${{ matrix.ext }}

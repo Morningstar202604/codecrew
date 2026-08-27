@@ -1,29 +1,30 @@
-# Build artifacts
-crew.exe
+# 构建产物
+/codecrew
+/codecrew.exe
+/crew
+/crew.exe
+/dist/
+/build/
 *.exe
-*.dll
-*.so
-*.dylib
+*.exe~
+*.tmp
 *.test
 *.out
 
-# Config (secrets)
+# 本地配置与密钥（绝不提交）
 codecrew.json
+!codecrew.example.json
+/.codecrew/
 ~/.codecrew/config.json
 
-# IDE
+# 编辑器 / 系统
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# OS
 .DS_Store
 Thumbs.db
 
-# Logs
+# 日志与临时文件
 *.log
-
-# Temp
-*.tmp
-*.temp
+*.bak

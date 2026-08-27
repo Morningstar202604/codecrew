@@ -1,0 +1,9 @@
+# 统一以 LF 存入仓库，避免内嵌角色文件被 CRLF 污染
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.mp4 binary
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary

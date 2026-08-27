@@ -3,32 +3,30 @@ package tool
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
+// Tool 是所有可被模型调用的能力的最小契约。
 type Tool interface {
 	Name() string
 	Description() string
+	// Schema 返回 JSON Schema 形式的参数定义（object 类型），由注册表包装成 OpenAI 工具格式。
 	Schema() map[string]any
 	Execute(ctx context.Context, args map[string]any) (string, error)
 }
 
-type Result struct {
-	Output string
-	Error  string
-}
-
-func Execute(ctx context.Context, t Tool, args map[string]any) Result {
-	output, err := t.Execute(ctx, args)
-	if err != nil {
-		return Result{Error: err.Error()}
-	}
-	return Result{Output: output}
-}
+// MaxOutputLines 限制回填给模型的输出行数，避免单次工具结果吃光上下文。
+const MaxOutputLines = 400
 
 func jsonSchema(typ string, properties map[string]any, required []string) map[string]any {
+	if properties == nil {
+		properties = map[string]any{}
+	}
+	if required == nil {
+		required = []string{}
+	}
 	return map[string]any{
 		"type":       typ,
 		"properties": properties,
@@ -44,6 +42,10 @@ func stringSchema(desc string) map[string]any {
 	return map[string]any{"type": "string", "description": desc}
 }
 
+func integerSchema(desc string) map[string]any {
+	return map[string]any{"type": "integer", "description": desc}
+}
+
 func getString(args map[string]any, key string) (string, error) {
 	v, ok := args[key]
 	if !ok {
@@ -54,6 +56,21 @@ func getString(args map[string]any, key string) (string, error) {
 		return "", fmt.Errorf("参数 %s 必须是字符串", key)
 	}
 	return s, nil
+}
+
+func getInt(args map[string]any, key string, def int) int {
+	v, ok := args[key]
+	if !ok {
+		return def
+	}
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	default:
+		return def
+	}
 }
 
 func getBool(args map[string]any, key string) (bool, error) {
@@ -68,27 +85,59 @@ func getBool(args map[string]any, key string) (bool, error) {
 	return b, nil
 }
 
-func safePath(base, p string) (string, error) {
-	if p == "" {
+// SafePath 把模型给的路径解析到 base 之下，拒绝越界与相对逃逸。
+// base 为空表示不限制目录（由调用方自行承担风险，bash 的 cwd 即属此类）。
+func SafePath(base, p string) (string, error) {
+	if strings.TrimSpace(p) == "" {
 		return "", fmt.Errorf("路径不能为空")
 	}
-	abs, err := filepath.Abs(filepath.Join(base, p))
+	if base == "" {
+		return filepath.Abs(p)
+	}
+	absBase, err := filepath.Abs(base)
 	if err != nil {
 		return "", err
 	}
-	absBase, _ := filepath.Abs(base)
-	if !strings.HasPrefix(abs, absBase) {
-		return "", fmt.Errorf("路径超出允许范围: %s", p)
+	target := p
+	if !filepath.IsAbs(target) {
+		// 相对路径以工作目录为基准，而不是进程当前目录
+		target = filepath.Join(absBase, target)
+	}
+	abs, err := filepath.Abs(target)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(absBase, abs)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("路径超出工作目录范围: %s（工作目录 %s）", p, absBase)
 	}
 	return abs, nil
 }
 
-func formatOutput(output string, maxLines int) string {
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	if len(lines) > maxLines {
-		return strings.Join(lines[:maxLines], "\n") + fmt.Sprintf("\n... (共 %d 行，已截断)", len(lines))
+// RelativePath 给出用于展示的相对路径，失败时退回原值。
+func RelativePath(base, abs string) string {
+	if rel, err := filepath.Rel(base, abs); err == nil && len(rel) < len(abs) {
+		return filepath.ToSlash(rel)
 	}
-	return output
+	return abs
 }
 
-var DefaultTimeout = 30 * time.Second
+// FormatOutput 截断过长输出，保留头部并说明丢了多少行。
+func FormatOutput(output string, maxLines int) string {
+	if maxLines <= 0 {
+		maxLines = MaxOutputLines
+	}
+	trimmed := strings.TrimRight(output, "\n")
+	lines := strings.Split(trimmed, "\n")
+	if len(lines) <= maxLines {
+		return trimmed
+	}
+	kept := strings.Join(lines[:maxLines], "\n")
+	return fmt.Sprintf("%s\n... 输出过长，已截断 %d/%d 行", kept, len(lines)-maxLines, len(lines))
+}
+
+// PathExists 判断路径是否存在。
+func PathExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
