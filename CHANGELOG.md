@@ -41,7 +41,9 @@
 
 ### 仓库维护
 
+- 许可证由 MIT 改为 Apache License 2.0（`LICENSE` 全文替换，README 引用同步）。
 - 移除误提交的 8.9MB 二进制 `crew.exe~`（此前被 git 跟踪，`.gitignore` 的 `*.exe` 不匹配 `~` 后缀），并在 `.gitignore` 补上 `*.exe~` 与更完整的构建产物规则。
+- 新增仓库外围配置：`.github/ISSUE_TEMPLATE/`（缺陷/功能）、`.github/pull_request_template.md`、`.github/dependabot.yml`（GitHub Actions + gomod）、`CONTRIBUTING.md`；GitHub 侧开启 `main` 分支保护（需 1 人审查、要求分支最新、禁止强推）。
 
 ## v0.0.1 — 2026-08-27
 

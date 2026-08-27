@@ -256,4 +256,4 @@ gofmt -l .               # 应无输出
 
 ## 📄 许可证
 
-MIT License，详见 [LICENSE](LICENSE)。
+Apache License 2.0，详见 [LICENSE](LICENSE)。
