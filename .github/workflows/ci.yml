@@ -17,7 +17,7 @@ jobs:
     name: 格式与静态检查
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version: "1.26"
@@ -36,7 +36,7 @@ jobs:
         go: ["1.26"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go }}
@@ -62,7 +62,7 @@ jobs:
           - {goos: darwin, goarch: arm64, suffix: darwin-arm64}
           - {goos: windows, goarch: amd64, suffix: windows-amd64, ext: .exe}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version: "1.26"
