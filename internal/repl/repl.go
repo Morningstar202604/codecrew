@@ -285,7 +285,9 @@ func (r *REPL) runTurn(userInput string) {
 		if err != nil {
 			fmt.Fprintf(r.out, "\n  ✗ %v\n", err)
 			if text != "" {
-				r.history = append(r.history, llm.TextMessage("assistant", text))
+				msg := llm.TextMessage("assistant", text)
+				r.history = append(r.history, msg)
+				r.appendSession(msg)
 			}
 			return
 		}
@@ -359,7 +361,9 @@ func (r *REPL) feedBack(call llm.ToolCall, content string, isErr bool) {
 
 func (r *REPL) appendSession(m llm.Message) {
 	if r.session != nil {
-		r.session.Append(m)
+		if err := r.session.Append(m); err != nil {
+			fmt.Fprintf(r.out, "  ⚠ 会话写入失败: %v\n", err)
+		}
 	}
 }
 
@@ -1228,6 +1232,14 @@ func (r *REPL) AllToolNames() []string { return r.registry.AllToolNames() }
 // ToolDecision 返回某工具的当前权限判定。
 func (r *REPL) ToolDecision(name string) string { return r.registry.Decide(name).String() }
 
+// ToolDescription 返回某工具的描述，不存在时返回名称本身。
+func (r *REPL) ToolDescription(name string) string {
+	if t, ok := r.registry.Get(name); ok {
+		return t.Description()
+	}
+	return name
+}
+
 // AllowTool 临时放行某工具（本次运行内生效）。
 func (r *REPL) AllowTool(name string) error {
 	if _, ok := r.registry.Get(name); !ok {
@@ -1281,7 +1293,11 @@ func (r *REPL) buildClient() *llm.Client {
 	if provider.APIKey == "" && !isLocal(provider.BaseURL) {
 		fmt.Fprintf(r.out, "  ⚠ 供应商 %s 没有 api_key，若为本地模型可忽略\n", firstProvider(r.cfg, provider.BaseURL))
 	}
-	return llm.New(provider.BaseURL, provider.APIKey, modelID)
+	client := llm.New(provider.BaseURL, provider.APIKey, modelID)
+	if r.cfg.Temperature != nil {
+		client.Temperature = r.cfg.Temperature
+	}
+	return client
 }
 
 func isLocal(baseURL string) bool {
