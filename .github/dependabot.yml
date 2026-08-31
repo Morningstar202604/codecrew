@@ -1,4 +1,5 @@
 version: 2
+enable-auto-merge: true
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
