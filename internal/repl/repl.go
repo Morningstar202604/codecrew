@@ -14,6 +14,7 @@ import (
 
 	"codecrew/internal/config"
 	"codecrew/internal/disp"
+	"codecrew/internal/i18n"
 	"codecrew/internal/llm"
 	"codecrew/internal/mcp"
 	"codecrew/internal/memory"
@@ -58,6 +59,7 @@ type REPL struct {
 	compacts int
 
 	mcpClients []*mcp.Client // MCP 服务器客户端，关闭时清理
+	lang       i18n.Language // 界面语言
 }
 
 type usageTracker struct {
@@ -97,6 +99,7 @@ func New(cfg *config.Config, opt Options) (*REPL, error) {
 	}
 	r.registry = tool.NewDefaultRegistry(cfg.WorkDir())
 	r.plan = findPlanner(r.registry)
+	r.lang = i18n.Parse(cfg.Language)
 	r.applyRole(current)
 	r.client = r.buildClient()
 	r.history = []llm.Message{llm.TextMessage("system", r.systemPromptFor(current))}
@@ -166,6 +169,34 @@ func (r *REPL) CloseMCP() {
 	r.mcpClients = nil
 }
 
+// T 返回当前语言的翻译。args 可选，用于格式化。
+func (r *REPL) T(key string, args ...any) string {
+	return i18n.T(r.lang, key, args...)
+}
+
+// Language 返回当前界面语言。
+func (r *REPL) Language() i18n.Language { return r.lang }
+
+// SetLanguage 设置界面语言。
+func (r *REPL) SetLanguage(lang i18n.Language) { r.lang = lang }
+
+// handleLanguage 处理 /language 命令，查看或切换语言。
+func (r *REPL) handleLanguage(arg string) {
+	if arg == "" {
+		fmt.Fprintf(r.out, "\n  当前语言: %s\n", r.lang)
+		fmt.Fprintln(r.out, "  支持: zh-CN (中文), en-US (English)")
+		fmt.Fprintln(r.out, "  用法: /language zh-CN 或 /language en-US")
+		return
+	}
+	lang := i18n.Parse(arg)
+	r.lang = lang
+	if lang == i18n.EnUS {
+		fmt.Fprintf(r.out, "\n  Language switched to: %s\n", lang)
+	} else {
+		fmt.Fprintf(r.out, "\n  语言已切换为: %s\n", lang)
+	}
+}
+
 // ---------------------------------------------------------------- 主循环
 
 // Run 进入 REPL。opt.First 非空时执行单轮后返回。
@@ -200,6 +231,7 @@ var chineseCommands = map[string]string{
 	"上下文": "context", "工具": "tools", "权限": "permissions", "成本": "cost",
 	"会话": "sessions", "恢复": "resume", "新建": "new", "保存": "save", "撤销": "undo",
 	"流水线": "pipeline", "圆桌": "roundtable", "记忆": "memory",
+	"语言": "language",
 }
 
 func (r *REPL) handleInput(input string) {
@@ -255,6 +287,8 @@ func (r *REPL) handleInput(input string) {
 		r.undo()
 	case "cost":
 		r.printCost()
+	case "language", "lang":
+		r.handleLanguage(arg)
 	case "sessions":
 		r.listSessions()
 	case "resume":

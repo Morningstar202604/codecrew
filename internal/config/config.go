@@ -44,7 +44,9 @@ type Config struct {
 	MaxContextTokens int               `json:"max_context_tokens,omitempty"`
 	MaxToolRounds    int               `json:"max_tool_rounds,omitempty"`
 	Temperature      *float64          `json:"temperature,omitempty"`
-	Source           string            `json:"-"` // 实际加载到的文件，仅用于展示
+	// Language 是界面语言，支持 zh-CN / en-US，默认 zh-CN。
+	Language string `json:"language,omitempty"`
+	Source   string `json:"-"` // 实际加载到的文件，仅用于展示
 }
 
 func (c *Config) defaults() {
