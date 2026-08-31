@@ -108,25 +108,30 @@ func SafePath(base, p string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// 解析符号链接用于越界检查（防止通过 symlink 逃逸）
-	// 解析 base 的符号链接
-	resolvedBase := absBase
-	if rb, err := filepath.EvalSymlinks(absBase); err == nil {
-		resolvedBase = rb
-	}
-	// 解析目标路径的符号链接（文件存在时）
-	resolvedAbs := abs
-	if ra, err := filepath.EvalSymlinks(abs); err == nil {
-		resolvedAbs = ra
+	// 越界检查：文件存在时解析符号链接防止逃逸；不存在时直接用原始路径检查
+	// （文件不存在就不可能通过符号链接逃逸到外部）
+	checkBase := absBase
+	checkAbs := abs
+	if _, err := os.Stat(abs); err == nil {
+		// 文件存在，解析符号链接
+		if rb, err := filepath.EvalSymlinks(absBase); err == nil {
+			checkBase = rb
+		}
+		if ra, err := filepath.EvalSymlinks(abs); err == nil {
+			checkAbs = ra
+		}
 	} else {
-		// 文件不存在时，解析父目录的符号链接
+		// 文件不存在，尝试解析父目录的符号链接
 		parent := filepath.Dir(abs)
 		if rp, err := filepath.EvalSymlinks(parent); err == nil {
-			resolvedAbs = filepath.Join(rp, filepath.Base(abs))
+			checkAbs = filepath.Join(rp, filepath.Base(abs))
+			if rb, err := filepath.EvalSymlinks(absBase); err == nil {
+				checkBase = rb
+			}
 		}
+		// 如果父目录也不存在，checkBase/checkAbs 保持原始路径
 	}
-	// 用解析后的路径做越界检查
-	rel, err := filepath.Rel(resolvedBase, resolvedAbs)
+	rel, err := filepath.Rel(checkBase, checkAbs)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("路径超出工作目录范围: %s（工作目录 %s）", p, absBase)
 	}
