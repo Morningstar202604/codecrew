@@ -135,6 +135,12 @@ func (r *REPL) completeRoundtableTurn(history []llm.Message) (string, error) {
 		return "", err
 	}
 	r.usage.turns++
+	// 统计 prompt 和 completion tokens
+	var promptText strings.Builder
+	for _, m := range history {
+		promptText.WriteString(m.Content)
+	}
+	r.usage.prompt += estimateTokens(promptText.String())
 	r.usage.completion += estimateTokens(text)
 	return text, nil
 }
@@ -155,18 +161,21 @@ func (r *REPL) roundtableSummary(topic string, speeches []string) (string, error
 }
 
 // parseRoundtableArgs 解析 "/roundtable 话题 [轮数]" 格式。
+// 只有当末尾是 1-5 的纯数字时才认为是轮数（最大轮数为 5），
+// 避免把话题末尾的数字（如 "讨论 Go 2"）误解析为轮数。
 func parseRoundtableArgs(arg string) (string, int) {
 	arg = strings.TrimSpace(arg)
 	if arg == "" {
 		return "", 0
 	}
-	// 尝试从末尾提取数字作为轮数
 	fields := strings.Fields(arg)
 	if len(fields) >= 2 {
 		last := fields[len(fields)-1]
-		if n, err := strconv.Atoi(last); err == nil && n > 0 {
+		if n, err := strconv.Atoi(last); err == nil && n >= 1 && n <= 5 {
 			topic := strings.Join(fields[:len(fields)-1], " ")
-			return topic, n
+			if topic != "" {
+				return topic, n
+			}
 		}
 	}
 	return arg, 0

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"codecrew/internal/config"
@@ -65,6 +66,11 @@ func main() {
 		addr := *flagAddr
 		if addr == "" {
 			addr = "0.0.0.0"
+		}
+		// 验证端口格式
+		portNum, err := strconv.Atoi(*flagPort)
+		if err != nil || portNum < 1 || portNum > 65535 {
+			fatal(fmt.Errorf("无效端口 %q，必须是 1-65535 的整数", *flagPort))
 		}
 		srv := server.NewServer(cfg, base)
 		if err := srv.ListenAndServe(addr + ":" + *flagPort); err != nil {

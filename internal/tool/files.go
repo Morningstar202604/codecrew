@@ -187,7 +187,12 @@ func (t *EditTool) Execute(ctx context.Context, args map[string]any) (string, er
 		return "", fmt.Errorf("old_text 匹配到 %d 处，请扩大上下文使其唯一", count)
 	}
 	updated := strings.Replace(content, oldText, newText, 1)
-	if err := os.WriteFile(absPath, []byte(updated), 0o644); err != nil {
+	// 保留原文件权限
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(absPath); err == nil {
+		mode = info.Mode()
+	}
+	if err := os.WriteFile(absPath, []byte(updated), mode); err != nil {
 		return "", fmt.Errorf("写入失败: %w", err)
 	}
 	return fmt.Sprintf("已修改 %s（1 处替换，%d → %d 字节）", RelativePath(t.base, absPath), len(content), len(updated)), nil

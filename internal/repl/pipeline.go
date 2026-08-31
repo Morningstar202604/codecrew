@@ -159,6 +159,7 @@ func (r *REPL) runRoleTurn(roleName, userInput string) (string, error) {
 	ctx := context.Background()
 	var finalText string
 	for round := 0; round < maxRounds; round++ {
+		r.compactIfNeeded()
 		text, calls, usage, err := r.client.Chat(ctx, r.history, r.registry.Schemas(), func(delta string) {
 			fmt.Fprint(r.out, delta)
 		})

@@ -46,10 +46,11 @@ type Usage struct {
 }
 
 type Client struct {
-	BaseURL string
-	APIKey  string
-	Model   string
-	HTTP    *http.Client
+	BaseURL     string
+	APIKey      string
+	Model       string
+	HTTP        *http.Client
+	Temperature *float64 // 可选，覆盖默认采样温度
 }
 
 func New(baseURL, apiKey, model string) *Client {
@@ -57,7 +58,9 @@ func New(baseURL, apiKey, model string) *Client {
 		BaseURL: strings.TrimRight(baseURL, "/"),
 		APIKey:  apiKey,
 		Model:   model,
-		HTTP:    &http.Client{},
+		HTTP: &http.Client{
+			Timeout: 120 * time.Second,
+		},
 	}
 }
 
@@ -174,7 +177,7 @@ func (a *callAccumulator) result() []ToolCall {
 
 // Chat 发起流式对话。返回本轮完整文本、归并后的工具调用列表与 token 统计。
 func (c *Client) Chat(ctx context.Context, messages []Message, tools []map[string]any, onDelta func(string)) (string, []ToolCall, *Usage, error) {
-	payload, err := json.Marshal(chatRequest{Model: c.Model, Messages: messages, Stream: true, Tools: tools})
+	payload, err := json.Marshal(chatRequest{Model: c.Model, Messages: messages, Stream: true, Tools: tools, Temperature: c.Temperature})
 	if err != nil {
 		return "", nil, nil, err
 	}
@@ -247,7 +250,7 @@ func (c *Client) Chat(ctx context.Context, messages []Message, tools []map[strin
 
 // Complete 发起一次非流式补全，用于摘要等后台任务。
 func (c *Client) Complete(ctx context.Context, messages []Message) (string, error) {
-	payload, err := json.Marshal(chatRequest{Model: c.Model, Messages: messages, Stream: false})
+	payload, err := json.Marshal(chatRequest{Model: c.Model, Messages: messages, Stream: false, Temperature: c.Temperature})
 	if err != nil {
 		return "", err
 	}
