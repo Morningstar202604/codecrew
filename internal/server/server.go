@@ -25,17 +25,22 @@ type Server struct {
 	baseDir  string
 	mu       sync.RWMutex
 	sessions map[string]*WebSession
+	once     sync.Once
 }
 
 // WebSession 是一个 Web 端会话，持有独立的 REPL 实例与输出通道。
 type WebSession struct {
-	ID        string
-	REPL      *repl.REPL
-	out       *SwitchableWriter
-	mu        sync.Mutex
-	busy      bool
-	createdAt time.Time
+	ID         string
+	REPL       *repl.REPL
+	out        *SwitchableWriter
+	mu         sync.Mutex
+	busy       bool
+	createdAt  time.Time
+	lastActive time.Time
 }
+
+// sessionTTL 是 Web 会话的最大空闲时间，超过后会被清理。
+const sessionTTL = 2 * time.Hour
 
 // SwitchableWriter 是可切换目标的 io.Writer，REPL 创建时注入，
 // 每次请求时切换到当前的 channel writer，实现输出流式推送。
@@ -60,12 +65,17 @@ func (w *SwitchableWriter) SetTarget(t io.Writer) {
 }
 
 // channelWriter 把输出写到 string channel，供 SSE 推送。
+// 非阻塞写入：channel 满时丢弃溢出内容，避免 REPL 因慢客户端而卡住。
 type channelWriter struct {
 	ch chan<- string
 }
 
 func (w *channelWriter) Write(p []byte) (int, error) {
-	w.ch <- stripANSI(string(p))
+	select {
+	case w.ch <- stripANSI(string(p)):
+	default:
+		// channel 满，丢弃此块输出（客户端太慢）
+	}
 	return len(p), nil
 }
 
@@ -121,7 +131,14 @@ func (s *Server) Handler() http.Handler {
 // ListenAndServe 启动 HTTP 服务。
 func (s *Server) ListenAndServe(addr string) error {
 	fmt.Printf("CodeCrew Web 服务已启动: http://%s\n", addr)
-	return http.ListenAndServe(addr, s.Handler())
+	srv := &http.Server{
+		Addr:         addr,
+		Handler:      s.Handler(),
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 0, // SSE 长连接需要无限写入超时
+		IdleTimeout:  120 * time.Second,
+	}
+	return srv.ListenAndServe()
 }
 
 // getOrCreateSession 获取或创建 Web 会话。
@@ -131,6 +148,9 @@ func (s *Server) getOrCreateSession(sessionID string) (*WebSession, error) {
 
 	if sessionID != "" {
 		if ws, ok := s.sessions[sessionID]; ok {
+			ws.mu.Lock()
+			ws.lastActive = time.Now()
+			ws.mu.Unlock()
 			return ws, nil
 		}
 	}
@@ -141,6 +161,19 @@ func (s *Server) getOrCreateSession(sessionID string) (*WebSession, error) {
 
 	out := &SwitchableWriter{}
 	sessCfg := *s.cfg
+	// 深拷贝 map，避免会话间共享底层 map
+	if s.cfg.Permissions != nil {
+		sessCfg.Permissions = make(map[string]string, len(s.cfg.Permissions))
+		for k, v := range s.cfg.Permissions {
+			sessCfg.Permissions[k] = v
+		}
+	}
+	if s.cfg.Providers != nil {
+		sessCfg.Providers = make(map[string]config.Provider, len(s.cfg.Providers))
+		for k, v := range s.cfg.Providers {
+			sessCfg.Providers[k] = v
+		}
+	}
 	r, err := repl.New(&sessCfg, repl.Options{
 		BaseDir: s.baseDir,
 		Stdin:   strings.NewReader(""),
@@ -152,13 +185,47 @@ func (s *Server) getOrCreateSession(sessionID string) (*WebSession, error) {
 	}
 
 	ws := &WebSession{
-		ID:        sessionID,
-		REPL:      r,
-		out:       out,
-		createdAt: time.Now(),
+		ID:         sessionID,
+		REPL:       r,
+		out:        out,
+		createdAt:  time.Now(),
+		lastActive: time.Now(),
 	}
 	s.sessions[sessionID] = ws
+	// 启动后台清理（仅首次）
+	s.once.Do(s.startCleanup)
 	return ws, nil
+}
+
+// startCleanup 启动后台 goroutine，定期清理过期会话。
+func (s *Server) startCleanup() {
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			s.cleanupExpiredSessions()
+		}
+	}()
+}
+
+// cleanupExpiredSessions 清理超过 sessionTTL 未活动的会话。
+func (s *Server) cleanupExpiredSessions() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	for id, ws := range s.sessions {
+		ws.mu.Lock()
+		busy := ws.busy
+		lastActive := ws.lastActive
+		ws.mu.Unlock()
+		if busy {
+			continue
+		}
+		if now.Sub(lastActive) > sessionTTL {
+			ws.REPL.ClearHistory()
+			delete(s.sessions, id)
+		}
+	}
 }
 
 // runInput 在 Web 会话中执行一条输入，输出通过返回的 channel 流式推送。
