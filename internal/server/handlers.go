@@ -213,6 +213,20 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := ws.REPL.Config()
+	// 脱敏供应商信息，绝不返回 api_key
+	type providerSafe struct {
+		Name    string   `json:"name"`
+		BaseURL string   `json:"base_url"`
+		Models  []string `json:"models"`
+		HasKey  bool     `json:"has_key"`
+	}
+	providers := make([]providerSafe, 0)
+	for _, name := range cfg.ProviderNames() {
+		p := cfg.Providers[name]
+		providers = append(providers, providerSafe{
+			Name: name, BaseURL: p.BaseURL, Models: p.Models, HasKey: p.APIKey != "",
+		})
+	}
 	writeJSON(w, 200, map[string]any{
 		"model":              cfg.Model,
 		"working_dir":        cfg.WorkDir(),
@@ -220,7 +234,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"max_tool_rounds":    cfg.MaxToolRounds,
 		"permissions":        cfg.Permissions,
 		"source":             cfg.Source,
-		"providers":          cfg.Providers,
+		"providers":          providers,
 	})
 }
 
@@ -533,32 +547,11 @@ func (s *Server) handleTools(w http.ResponseWriter, r *http.Request) {
 	for _, name := range names {
 		decision := ws.REPL.ToolDecision(name)
 		out = append(out, toolInfo{
-			Name: name, Description: toolDesc(name),
+			Name: name, Description: ws.REPL.ToolDescription(name),
 			Permission: decision, Allowed: decision != "deny",
 		})
 	}
 	writeJSON(w, 200, map[string]any{"tools": out})
-}
-
-func toolDesc(name string) string {
-	switch name {
-	case "read":
-		return "读取文件内容（带行号）"
-	case "write":
-		return "写入文件（新建或覆盖）"
-	case "edit":
-		return "编辑文件（唯一匹配替换）"
-	case "bash":
-		return "执行 shell 命令"
-	case "glob":
-		return "按通配模式查找文件"
-	case "grep":
-		return "正则搜索文件内容"
-	case "plan":
-		return "维护任务清单"
-	default:
-		return name
-	}
 }
 
 func (s *Server) handlePermissions(w http.ResponseWriter, r *http.Request) {

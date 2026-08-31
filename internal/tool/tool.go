@@ -87,6 +87,7 @@ func getBool(args map[string]any, key string) (bool, error) {
 
 // SafePath 把模型给的路径解析到 base 之下，拒绝越界与相对逃逸。
 // base 为空表示不限制目录（由调用方自行承担风险，bash 的 cwd 即属此类）。
+// 会解析符号链接，防止通过 symlink 逃逸到工作目录之外。
 func SafePath(base, p string) (string, error) {
 	if strings.TrimSpace(p) == "" {
 		return "", fmt.Errorf("路径不能为空")
@@ -98,6 +99,10 @@ func SafePath(base, p string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// 解析 base 的符号链接，确保基准路径真实
+	if resolvedBase, err := filepath.EvalSymlinks(absBase); err == nil {
+		absBase = resolvedBase
+	}
 	target := p
 	if !filepath.IsAbs(target) {
 		// 相对路径以工作目录为基准，而不是进程当前目录
@@ -106,6 +111,16 @@ func SafePath(base, p string) (string, error) {
 	abs, err := filepath.Abs(target)
 	if err != nil {
 		return "", err
+	}
+	// 解析目标路径的符号链接（文件存在时）
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	} else {
+		// 文件不存在时，解析父目录的符号链接
+		parent := filepath.Dir(abs)
+		if resolvedParent, err := filepath.EvalSymlinks(parent); err == nil {
+			abs = filepath.Join(resolvedParent, filepath.Base(abs))
+		}
 	}
 	rel, err := filepath.Rel(absBase, abs)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
