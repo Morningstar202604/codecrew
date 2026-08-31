@@ -15,6 +15,7 @@ import (
 	"codecrew/internal/config"
 	"codecrew/internal/disp"
 	"codecrew/internal/llm"
+	"codecrew/internal/mcp"
 	"codecrew/internal/memory"
 	"codecrew/internal/role"
 	"codecrew/internal/session"
@@ -55,6 +56,8 @@ type REPL struct {
 	plan     *tool.PlanTool
 	started  time.Time
 	compacts int
+
+	mcpClients []*mcp.Client // MCP 服务器客户端，关闭时清理
 }
 
 type usageTracker struct {
@@ -98,6 +101,9 @@ func New(cfg *config.Config, opt Options) (*REPL, error) {
 	r.client = r.buildClient()
 	r.history = []llm.Message{llm.TextMessage("system", r.systemPromptFor(current))}
 
+	// 连接 MCP 服务器并注册工具
+	r.connectMCPServers()
+
 	if store, err := session.DefaultStore(); err == nil {
 		r.store = store
 		r.openSession(opt.SessionID)
@@ -116,6 +122,48 @@ func findPlanner(reg *tool.Registry) *tool.PlanTool {
 		}
 	}
 	return nil
+}
+
+// connectMCPServers 连接配置中的 MCP 服务器，注册它们提供的工具。
+// 连接失败的服务器会被跳过并打印警告，不影响其他功能。
+func (r *REPL) connectMCPServers() {
+	if len(r.cfg.MCPServers) == 0 {
+		return
+	}
+	for name, srv := range r.cfg.MCPServers {
+		if srv.Disabled || srv.Command == "" {
+			continue
+		}
+		client, err := mcp.NewClient(srv.Command, srv.Args...)
+		if err != nil {
+			fmt.Fprintf(r.out, "  ⚠ MCP 服务器 %q 连接失败: %v\n", name, err)
+			continue
+		}
+		tools, err := client.ListTools()
+		if err != nil {
+			fmt.Fprintf(r.out, "  ⚠ MCP 服务器 %q 获取工具列表失败: %v\n", name, err)
+			client.Close()
+			continue
+		}
+		registered := 0
+		for _, t := range tools {
+			adapter := mcp.NewToolAdapter(client, t)
+			// MCP 工具默认 ask 权限，需要用户确认
+			r.registry.Register(adapter, tool.DecisionAsk)
+			registered++
+		}
+		r.mcpClients = append(r.mcpClients, client)
+		fmt.Fprintf(r.out, "  ✓ MCP 服务器 %q (%s v%s)：注册 %d 个工具\n",
+			name, client.ServerName(), client.ServerVersion(), registered)
+	}
+}
+
+// CloseMCP 关闭所有 MCP 服务器连接。
+func (r *REPL) CloseMCP() {
+	for _, c := range r.mcpClients {
+		c.Close()
+	}
+	r.mcpClients = nil
 }
 
 // ---------------------------------------------------------------- 主循环
@@ -141,6 +189,7 @@ func (r *REPL) Run() error {
 		r.handleInput(input)
 	}
 	r.saveSession()
+	r.CloseMCP()
 	return nil
 }
 

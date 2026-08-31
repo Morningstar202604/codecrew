@@ -53,5 +53,19 @@
   "max_tool_rounds": 12,
 
   "//working_dir": "可选：工具读写与命令执行的根目录，默认取当前目录，也可用 --cwd 或 CREW_WORKING_DIR 指定",
-  "working_dir": ""
+  "working_dir": "",
+
+  "//mcp": "MCP(Model Context Protocol)服务器：启动时自动连接并注册工具，工具名加 mcp_ 前缀，默认 ask 权限。command 是可执行文件，args 是启动参数，disabled=true 时不启动",
+  "mcp_servers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allow"],
+      "disabled": true
+    },
+    "fetch": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-fetch"],
+      "disabled": true
+    }
+  }
 }
