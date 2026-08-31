@@ -383,13 +383,32 @@ async function refreshTools() {
     for (const t of data.tools || []) {
       const item = document.createElement('div');
       item.className = 'tool-item';
+      let allowBtn = '';
+      if (t.permission === 'ask' && !t.allowed) {
+        allowBtn = `<button class="tool-allow-btn" data-tool="${escapeHtml(t.name)}">放行</button>`;
+      }
       item.innerHTML = `
         <span class="tool-name">${escapeHtml(t.name)}</span>
         <span class="tool-perm ${t.permission}">${t.permission}</span>
+        ${allowBtn}
       `;
       item.title = t.description || '';
       list.appendChild(item);
     }
+    // 绑定放行按钮
+    list.querySelectorAll('.tool-allow-btn').forEach(btn => {
+      btn.onclick = async (e) => {
+        e.stopPropagation();
+        const tool = btn.dataset.tool;
+        try {
+          await api('/api/permissions/allow', { method: 'POST', body: { session: state.sessionId || '', tool } });
+          showToast('已放行 ' + tool, 'success');
+          refreshTools();
+        } catch (err) {
+          showToast('放行失败: ' + err.message, 'error');
+        }
+      };
+    });
   } catch (e) {}
 }
 

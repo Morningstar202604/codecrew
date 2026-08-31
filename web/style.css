@@ -641,6 +641,18 @@ body {
 .tool-perm.allow { background: var(--success-light); color: var(--success); }
 .tool-perm.ask { background: var(--warning-light); color: var(--warning); }
 .tool-perm.deny { background: var(--danger-light); color: var(--danger); }
+.tool-allow-btn {
+  font-size: 11px;
+  padding: 3px 10px;
+  border: 1px solid var(--primary);
+  background: transparent;
+  color: var(--primary);
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+.tool-allow-btn:hover { background: var(--primary); color: white; }
 .tool-desc { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 
 /* 操作按钮网格 */
