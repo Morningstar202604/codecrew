@@ -674,12 +674,14 @@ function sendMessage() {
   if (!msg || state.isStreaming) return;
   input.value = '';
   input.style.height = 'auto';
+  input.blur(); // 移动端收起键盘
   streamChat(msg);
 }
 
 // ---------- 初始化 ----------
 async function init() {
   bindEvents();
+  setupMobileKeyboard();
   loadMessagesFromLocal();
   // 先检查健康状态
   try {
@@ -691,6 +693,37 @@ async function init() {
   await refreshAll();
   // 定期刷新统计
   setInterval(refreshStats, 10000);
+}
+
+// 移动端键盘适配
+function setupMobileKeyboard() {
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  if (!isMobile) return;
+
+  const input = $('#messageInput');
+  const chatContainer = $('#chatContainer');
+
+  // 聚焦时滚动到底部，确保输入框可见
+  input.addEventListener('focus', () => {
+    setTimeout(() => {
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+      input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 300);
+  });
+
+  // 监听 visualViewport 变化（键盘弹出/收起）
+  if (window.visualViewport) {
+    let lastHeight = window.visualViewport.height;
+    window.visualViewport.addEventListener('resize', () => {
+      if (window.visualViewport.height < lastHeight) {
+        // 键盘弹出，滚动到底部
+        setTimeout(() => {
+          chatContainer.scrollTop = chatContainer.scrollHeight;
+        }, 100);
+      }
+      lastHeight = window.visualViewport.height;
+    });
+  }
 }
 
 document.addEventListener('DOMContentLoaded', init);
