@@ -1013,10 +1013,17 @@ func (r *REPL) undo() {
 }
 
 func (r *REPL) printCost() {
-	total := r.usage.prompt + r.usage.completion
-	fmt.Fprintf(r.out, "\n  本次会话: %d 轮模型调用，%s\n", r.usage.turns, bright(fmt.Sprintf("tokens %d in / %d out / 共 %d", r.usage.prompt, r.usage.completion, total)))
+	turns, prompt, completion, elapsed, provider, inputPrice, outputPrice, cost, hasPrice := r.CostInfo()
+	total := prompt + completion
+	fmt.Fprintf(r.out, "\n  本次会话: %d 轮模型调用，%s\n", turns, bright(fmt.Sprintf("tokens %d in / %d out / 共 %d", prompt, completion, total)))
 	fmt.Fprintf(r.out, "  本地估算当前上下文: %d tokens\n", r.contextTokens())
-	fmt.Fprintf(r.out, "  用时 %s，压缩 %d 次\n", time.Since(r.started).Round(time.Second), r.compacts)
+	fmt.Fprintf(r.out, "  用时 %s，压缩 %d 次\n", elapsed.Round(time.Second), r.compacts)
+	if hasPrice {
+		fmt.Fprintf(r.out, "  供应商 %s：输入 $%.4f/1K，输出 $%.4f/1K\n", provider, inputPrice, outputPrice)
+		fmt.Fprintf(r.out, "  估算花费: %s\n", bright(fmt.Sprintf("$%.6f", cost)))
+	} else if provider != "" {
+		fmt.Fprintf(r.out, "  供应商 %s：%s\n", provider, dim("未配置单价，无法估算花费。在 codecrew.json 中设置 input_price / output_price 即可"))
+	}
 	fmt.Fprintln(r.out, "  "+dim("供应商计费口径可能不同，此处仅作量级参考"))
 }
 
@@ -1218,6 +1225,27 @@ func (r *REPL) ContextStats() (used, limit int) {
 // CostStats 返回本次会话的成本统计。
 func (r *REPL) CostStats() (turns, prompt, completion int, elapsed time.Duration) {
 	return r.usage.turns, r.usage.prompt, r.usage.completion, time.Since(r.started)
+}
+
+// CostInfo 返回本次会话的成本信息，包含金钱估算。
+// 如果当前供应商未配置单价，cost 为 0 且 hasPrice 为 false。
+func (r *REPL) CostInfo() (turns, prompt, completion int, elapsed time.Duration, provider string, inputPrice, outputPrice, cost float64, hasPrice bool) {
+	turns, prompt, completion, elapsed = r.CostStats()
+	// 解析当前供应商
+	if r.cfg.Model != "" {
+		if p, _, err := r.cfg.Resolve(r.cfg.Model); err == nil {
+			// 从 spec 中解析供应商名称
+			name, _, _ := strings.Cut(r.cfg.Model, "/")
+			provider = name
+			inputPrice = p.InputPrice
+			outputPrice = p.OutputPrice
+			if inputPrice > 0 || outputPrice > 0 {
+				hasPrice = true
+				cost = float64(prompt)/1000.0*inputPrice + float64(completion)/1000.0*outputPrice
+			}
+		}
+	}
+	return
 }
 
 // CompactionCount 返回累计上下文压缩次数。

@@ -518,13 +518,18 @@ func (s *Server) handleCost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err.Error())
 		return
 	}
-	turns, prompt, completion, elapsed := ws.REPL.CostStats()
+	turns, prompt, completion, elapsed, provider, inputPrice, outputPrice, cost, hasPrice := ws.REPL.CostInfo()
 	writeJSON(w, 200, map[string]any{
 		"turns":             turns,
 		"prompt_tokens":     prompt,
 		"completion_tokens": completion,
 		"total_tokens":      prompt + completion,
 		"elapsed_seconds":   int(elapsed.Seconds()),
+		"provider":          provider,
+		"input_price":       inputPrice,
+		"output_price":      outputPrice,
+		"cost_usd":          cost,
+		"has_price":         hasPrice,
 	})
 }
 

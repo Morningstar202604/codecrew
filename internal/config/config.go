@@ -15,6 +15,10 @@ type Provider struct {
 	BaseURL string   `json:"base_url"`
 	APIKey  string   `json:"api_key"`
 	Models  []string `json:"models,omitempty"`
+	// InputPrice / OutputPrice 单位：美元 / 1K tokens，用于成本估算。
+	// 不填则该供应商不参与成本计算（显示为"未配置单价"）。
+	InputPrice  float64 `json:"input_price,omitempty"`
+	OutputPrice float64 `json:"output_price,omitempty"`
 }
 
 // Config 是 CodeCrew 的全部可配置项。

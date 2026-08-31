@@ -484,6 +484,16 @@ async function refreshStats() {
     $('#statCompletion').textContent = cost.completion_tokens;
     $('#statTotal').textContent = cost.total_tokens;
     $('#statElapsed').textContent = cost.elapsed_seconds + 's';
+    $('#statProvider').textContent = cost.provider || '-';
+    if (cost.has_price) {
+      $('#statCost').textContent = '$' + cost.cost_usd.toFixed(6);
+      $('#statCost').style.color = 'var(--accent)';
+      $('#statCost').style.fontWeight = '600';
+    } else {
+      $('#statCost').textContent = '未配置单价';
+      $('#statCost').style.color = 'var(--text-dim)';
+      $('#statCost').style.fontWeight = '400';
+    }
     $('#contextHint').textContent = '上下文: ' + ctx.used_tokens + '/' + ctx.limit_tokens;
   } catch (e) {}
 }
