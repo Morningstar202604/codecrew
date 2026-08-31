@@ -2,6 +2,27 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与语义化版本。
 
+## v0.2.0 — 2026-09-01
+团队化协作版本：流水线编排、圆桌讨论、角色长期记忆、变更 diff 预览。
+
+### 新增
+- **流水线编排 `/pipeline <任务>`**：一键启动 architect 拆解 → developer 实现 → reviewer 审查 → tester 测试的四阶段流水线。每个阶段独立运行 Agent 循环，结果自动传递给下一阶段，最终完整摘要写入主对话历史。支持中文别名 `流水线`。
+- **圆桌讨论 `/roundtable <话题> [轮数]`**：architect / developer / reviewer 三个角色就同一话题辩论 N 轮（默认 2 轮，最多 5 轮），每轮每人基于之前所有发言给出观点，最后由主持人输出「共识 / 分歧 / 建议方案」。支持中文别名 `圆桌`。
+- **角色长期记忆 `/memory`**：每个角色独立维护 Markdown 笔记，持久化到 `~/.codecrew/memory/<role>.md`。记忆自动注入到该角色的 system prompt 末尾，切换角色时自动加载。支持 `/memory` 查看、`/memory add <内容>` 添加、`/memory clear` 清空。支持中文别名 `记忆`。
+- **变更 diff 预览**：`write` / `edit` 工具执行前自动展示统一 diff（新增行绿色、删除行红色），用户确认后才真正写入。新建文件展示文件摘要，已有文件展示完整变更。
+- **新增 `internal/memory` 包**：角色记忆的存储、注入与文件名清理逻辑，独立可测试。
+- **新增 `internal/tool/diff.go`**：基于 LCS 的统一 diff 生成器，支持上下文行、截断保护、write/edit 预览封装。
+
+### 变更
+- `system prompt` 构建统一走 `REPL.systemPromptFor()`，在 New / switchRole / SetRole / newSession / resumeSession 等所有入口自动注入角色记忆，不再散落各处直接用 `target.Prompt`。
+- `approve` 函数增加 diff 预览分支，write/edit 确认前先展示变更。
+- 帮助文本新增 `/pipeline`、`/roundtable`、`/memory` 三条命令说明。
+- 中文别名表新增 `流水线`、`圆桌`、`记忆`。
+
+### 质量
+- 新增 30+ 测试用例：memory 包 9 个，diff 包 12 个，repl 集成测试 10+ 个（流水线全流程、圆桌全流程、参数解析、非流式补全等）。
+- `gofmt` / `go vet` / `go test -race` 全绿。
+
 ## v0.1.0 — 2026-08-27
 
 首个真正可日常使用的版本：修通 Agent 闭环，补齐权限、上下文、会话与测试。

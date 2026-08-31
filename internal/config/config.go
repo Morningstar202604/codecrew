@@ -158,15 +158,23 @@ func applyEnv(cfg *Config) {
 		provider.BaseURL = firstNonEmpty(provider.BaseURL, baseURL, "https://api.deepseek.com")
 		provider.APIKey = firstNonEmpty(provider.APIKey, apiKey)
 		custom := model
-		if custom != "" && !strings.Contains(custom, "/") {
-			if !contains(provider.Models, custom) {
-				provider.Models = append([]string{custom}, provider.Models...)
+		if custom != "" {
+			if strings.Contains(custom, "/") {
+				// 用户指定了完整的 供应商/模型名，直接使用
+				if cfg.Model == "" {
+					cfg.Model = custom
+				}
+			} else {
+				// 只有模型名，当作 env 供应商的模型
+				if !contains(provider.Models, custom) {
+					provider.Models = append([]string{custom}, provider.Models...)
+				}
+				if cfg.Model == "" {
+					cfg.Model = "env/" + custom
+				}
 			}
 		}
 		cfg.Providers["env"] = provider
-		if cfg.Model == "" && custom != "" {
-			cfg.Model = "env/" + custom
-		}
 	}
 	if wd := os.Getenv("CREW_WORKING_DIR"); wd != "" && cfg.WorkingDir == "" {
 		cfg.WorkingDir = wd

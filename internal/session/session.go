@@ -99,23 +99,26 @@ func (s *Session) Meta() Meta { return s.meta }
 // Path 返回会话文件路径。
 func (s *Session) Path() string { return s.path }
 
-// Append 追加一条消息（忽略空消息）。
-func (s *Session) Append(m llm.Message) {
+// Append 追加一条消息（忽略空消息）。返回写入错误，调用方应检查。
+func (s *Session) Append(m llm.Message) error {
 	if s == nil || s.f == nil {
-		return
+		return nil
 	}
 	if m.Role == "" || (m.Content == "" && len(m.ToolCalls) == 0) {
-		return
+		return nil
 	}
 	data, err := json.Marshal(newRecord(m))
 	if err != nil {
-		return
+		return fmt.Errorf("序列化消息失败: %w", err)
 	}
-	_, _ = s.f.Write(append(data, '\n'))
+	if _, err := s.f.Write(append(data, '\n')); err != nil {
+		return fmt.Errorf("写入会话失败: %w", err)
+	}
 	s.meta.Messages++
 	if s.meta.Preview == "" && m.Role == "user" {
 		s.meta.Preview = truncate(m.Content, 60)
 	}
+	return nil
 }
 
 // Flush 落盘。

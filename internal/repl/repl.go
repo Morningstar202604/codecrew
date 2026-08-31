@@ -15,6 +15,7 @@ import (
 	"codecrew/internal/config"
 	"codecrew/internal/disp"
 	"codecrew/internal/llm"
+	"codecrew/internal/memory"
 	"codecrew/internal/role"
 	"codecrew/internal/session"
 	"codecrew/internal/tool"
@@ -48,6 +49,7 @@ type REPL struct {
 
 	store   *session.Store
 	session *session.Session
+	memory  *memory.Store
 	usage   usageTracker
 
 	plan     *tool.PlanTool
@@ -94,11 +96,14 @@ func New(cfg *config.Config, opt Options) (*REPL, error) {
 	r.plan = findPlanner(r.registry)
 	r.applyRole(current)
 	r.client = r.buildClient()
-	r.history = []llm.Message{llm.TextMessage("system", current.Prompt)}
+	r.history = []llm.Message{llm.TextMessage("system", r.systemPromptFor(current))}
 
 	if store, err := session.DefaultStore(); err == nil {
 		r.store = store
 		r.openSession(opt.SessionID)
+	}
+	if mem, err := memory.DefaultStore(); err == nil {
+		r.memory = mem
 	}
 	r.registry.SetApprover(r.approve)
 	return r, nil
@@ -145,6 +150,7 @@ var chineseCommands = map[string]string{
 	"帮助": "help", "退出": "exit", "清空": "clear", "压缩": "compact",
 	"上下文": "context", "工具": "tools", "权限": "permissions", "成本": "cost",
 	"会话": "sessions", "恢复": "resume", "新建": "new", "保存": "save", "撤销": "undo",
+	"流水线": "pipeline", "圆桌": "roundtable", "记忆": "memory",
 }
 
 func (r *REPL) handleInput(input string) {
@@ -179,6 +185,17 @@ func (r *REPL) handleInput(input string) {
 		} else {
 			r.addPlanTask(arg)
 		}
+	case "pipeline":
+		if err := r.RunPipeline(arg); err != nil {
+			fmt.Fprintf(r.out, "  ✗ 流水线失败: %v\n", err)
+		}
+	case "roundtable":
+		topic, rounds := parseRoundtableArgs(arg)
+		if err := r.RunRoundtable(topic, rounds); err != nil {
+			fmt.Fprintf(r.out, "  ✗ 圆桌讨论失败: %v\n", err)
+		}
+	case "memory":
+		r.handleMemory(arg)
 	case "context", "ctx":
 		r.printContext()
 	case "compact":
@@ -268,7 +285,9 @@ func (r *REPL) runTurn(userInput string) {
 		if err != nil {
 			fmt.Fprintf(r.out, "\n  ✗ %v\n", err)
 			if text != "" {
-				r.history = append(r.history, llm.TextMessage("assistant", text))
+				msg := llm.TextMessage("assistant", text)
+				r.history = append(r.history, msg)
+				r.appendSession(msg)
 			}
 			return
 		}
@@ -342,7 +361,9 @@ func (r *REPL) feedBack(call llm.ToolCall, content string, isErr bool) {
 
 func (r *REPL) appendSession(m llm.Message) {
 	if r.session != nil {
-		r.session.Append(m)
+		if err := r.session.Append(m); err != nil {
+			fmt.Fprintf(r.out, "  ⚠ 会话写入失败: %v\n", err)
+		}
 	}
 }
 
@@ -479,6 +500,10 @@ func (r *REPL) approve(t tool.Tool, args map[string]any) tool.Decision {
 			return tool.DecisionDeny
 		}
 	}
+	// write / edit 前展示统一 diff 预览
+	if t.Name() == "write" || t.Name() == "edit" {
+		r.showDiffPreview(t.Name(), args)
+	}
 	fmt.Fprintf(r.out, "  %s 请求执行 %s: %s\n", bright(r.current.Name), t.Name(), dim(tool.Summary(t, args)))
 	ok, always := r.askConfirm("允许？[y/N/a=本角色内始终允许]")
 	if !ok {
@@ -489,6 +514,62 @@ func (r *REPL) approve(t tool.Tool, args map[string]any) tool.Decision {
 		fmt.Fprintf(r.out, "  ✓ %s 在本次角色内不再询问\n", t.Name())
 	}
 	return tool.DecisionAllow
+}
+
+// showDiffPreview 在 write/edit 前展示统一 diff。失败时静默跳过，不影响主流程。
+func (r *REPL) showDiffPreview(toolName string, args map[string]any) {
+	path, _ := args["path"].(string)
+	if path == "" {
+		return
+	}
+	// 解析为工作目录下的绝对路径，用于读取原文件
+	absPath := path
+	if r.cfg.WorkDir() != "" {
+		if abs, err := tool.SafePath(r.cfg.WorkDir(), path); err == nil {
+			absPath = abs
+		}
+	}
+	var diff string
+	var err error
+	switch toolName {
+	case "write":
+		content, _ := args["content"].(string)
+		diff = tool.PreviewWrite(absPath, content)
+	case "edit":
+		oldText, _ := args["old_text"].(string)
+		newText, _ := args["new_text"].(string)
+		diff, err = tool.PreviewEdit(absPath, oldText, newText)
+	}
+	if err != nil || diff == "" {
+		return
+	}
+	fmt.Fprintln(r.out)
+	fmt.Fprintln(r.out, "  "+bright("变更预览："))
+	for _, line := range strings.Split(diff, "\n") {
+		if line == "" {
+			continue
+		}
+		prefix := "  "
+		if strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") {
+			prefix = "  " + dim(line)
+			fmt.Fprintln(r.out, prefix)
+			continue
+		}
+		if strings.HasPrefix(line, "@@") {
+			fmt.Fprintf(r.out, "  %s\n", dim(line))
+			continue
+		}
+		if strings.HasPrefix(line, "-") {
+			fmt.Fprintf(r.out, "  \x1b[31m%s\x1b[0m\n", line)
+			continue
+		}
+		if strings.HasPrefix(line, "+") {
+			fmt.Fprintf(r.out, "  \x1b[32m%s\x1b[0m\n", line)
+			continue
+		}
+		fmt.Fprintf(r.out, "  %s\n", line)
+	}
+	fmt.Fprintln(r.out)
 }
 
 // askConfirm 打印提示并等待一行输入；EOF 视为拒绝并请求退出。
@@ -536,9 +617,9 @@ func (r *REPL) switchRole(name string) {
 	r.current = target
 	r.applyRole(target)
 	if len(r.history) > 0 && r.history[0].Role == "system" {
-		r.history[0] = llm.TextMessage("system", target.Prompt)
+		r.history[0] = llm.TextMessage("system", r.systemPromptFor(target))
 	} else {
-		r.history = append([]llm.Message{llm.TextMessage("system", target.Prompt)}, r.history...)
+		r.history = append([]llm.Message{llm.TextMessage("system", r.systemPromptFor(target))}, r.history...)
 	}
 	unknown := target.Tools
 	filtered := unknown[:0]
@@ -556,6 +637,17 @@ func (r *REPL) switchRole(name string) {
 func (r *REPL) applyRole(target role.Role) {
 	r.registry.SetRoleAllowed(target.Tools)
 	r.registry.SetPermissions(r.cfg.Permissions)
+}
+
+// systemPromptFor 构建角色的 system prompt，并自动注入该角色的长期记忆。
+func (r *REPL) systemPromptFor(target role.Role) string {
+	prompt := target.Prompt
+	if r.memory != nil {
+		if mem, err := r.memory.Load(target.Name); err == nil && mem != "" {
+			prompt = memory.InjectPrompt(prompt, mem)
+		}
+	}
+	return prompt
 }
 
 func (r *REPL) switchModel(spec string) {
@@ -805,6 +897,72 @@ func (r *REPL) addPlanTask(title string) {
 	fmt.Fprintf(r.out, "  ✓ %s\n", out)
 }
 
+// handleMemory 处理 /memory 命令：查看 / 添加 / 清空当前角色的长期记忆。
+func (r *REPL) handleMemory(arg string) {
+	if r.memory == nil {
+		fmt.Fprintln(r.out, "  ✗ 记忆存储不可用")
+		return
+	}
+	roleName := r.current.Name
+	arg = strings.TrimSpace(arg)
+
+	// 子命令：add / clear / list
+	if strings.HasPrefix(arg, "add ") {
+		note := strings.TrimPrefix(arg, "add ")
+		if err := r.memory.Append(roleName, note); err != nil {
+			fmt.Fprintf(r.out, "  ✗ %v\n", err)
+			return
+		}
+		fmt.Fprintf(r.out, "  ✓ 已添加到 %s 的记忆\n", bright(roleName))
+		// 重新注入记忆到 system prompt
+		if len(r.history) > 0 && r.history[0].Role == "system" {
+			r.history[0] = llm.TextMessage("system", r.systemPromptFor(r.current))
+		}
+		return
+	}
+	if arg == "clear" {
+		if err := r.memory.Clear(roleName); err != nil {
+			fmt.Fprintf(r.out, "  ✗ %v\n", err)
+			return
+		}
+		fmt.Fprintf(r.out, "  ✓ 已清空 %s 的记忆\n", bright(roleName))
+		if len(r.history) > 0 && r.history[0].Role == "system" {
+			r.history[0] = llm.TextMessage("system", r.systemPromptFor(r.current))
+		}
+		return
+	}
+	if arg == "list" || arg == "" {
+		mem, err := r.memory.Load(roleName)
+		if err != nil {
+			fmt.Fprintf(r.out, "  ✗ %v\n", err)
+			return
+		}
+		fmt.Fprintf(r.out, "\n  %s 的长期记忆（%s）:\n", bright(roleName), r.memory.Path(roleName))
+		if mem == "" {
+			fmt.Fprintln(r.out, "  （暂无记忆。用 /memory add <内容> 添加，记忆会自动注入到 system prompt）")
+		} else {
+			for _, line := range strings.Split(mem, "\n") {
+				fmt.Fprintf(r.out, "  %s\n", line)
+			}
+		}
+		// 列出其他有记忆的角色
+		if all, err := r.memory.List(); err == nil && len(all) > 1 {
+			var others []string
+			for _, n := range all {
+				if n != roleName {
+					others = append(others, n)
+				}
+			}
+			if len(others) > 0 {
+				fmt.Fprintf(r.out, "\n  %s\n", dim("其他角色也有记忆: "+strings.Join(others, ", ")))
+			}
+		}
+		fmt.Fprintln(r.out, "\n  用法: /memory 查看  /memory add <内容>  /memory clear 清空")
+		return
+	}
+	fmt.Fprintln(r.out, "  用法: /memory [add <内容>|clear|list]")
+}
+
 func (r *REPL) printContext() {
 	used := r.contextTokens()
 	limit := r.cfg.MaxContextTokens
@@ -905,7 +1063,7 @@ func (r *REPL) resumeSession(arg string) {
 		return
 	}
 	r.closeSession()
-	r.history = []llm.Message{llm.TextMessage("system", r.current.Prompt)}
+	r.history = []llm.Message{llm.TextMessage("system", r.systemPromptFor(r.current))}
 	r.openSession(id)
 	if meta.Role != "" {
 		r.switchRole(meta.Role)
@@ -918,7 +1076,7 @@ func (r *REPL) resumeSession(arg string) {
 
 func (r *REPL) newSession() {
 	r.closeSession()
-	r.history = []llm.Message{llm.TextMessage("system", r.current.Prompt)}
+	r.history = []llm.Message{llm.TextMessage("system", r.systemPromptFor(r.current))}
 	r.usage = usageTracker{}
 	r.openSession("")
 	fmt.Fprintf(r.out, "  ✓ 已开新会话 %s\n", r.sessionPath())
@@ -1001,7 +1159,7 @@ func (r *REPL) SetRole(name string) error {
 	}
 	r.current = target
 	r.applyRole(target)
-	r.history = []llm.Message{llm.TextMessage("system", target.Prompt)}
+	r.history = []llm.Message{llm.TextMessage("system", r.systemPromptFor(target))}
 	return nil
 }
 
@@ -1011,6 +1169,104 @@ func (r *REPL) History() []llm.Message {
 	copy(out, r.history)
 	return out
 }
+
+// Send 向 REPL 发送一条输入（可以是普通对话或 / 命令），阻塞执行直到完成。
+// 输出通过构造时传入的 Stdout writer 流出，调用方负责捕获。
+func (r *REPL) Send(input string) {
+	r.handleInput(input)
+	r.saveSession()
+}
+
+// CurrentRoleName 返回当前角色名。
+func (r *REPL) CurrentRoleName() string { return r.current.Name }
+
+// CurrentRole 返回当前角色的完整信息。
+func (r *REPL) CurrentRole() role.Role { return r.current }
+
+// Roles 返回所有可用角色。
+func (r *REPL) Roles() []role.Role {
+	out := make([]role.Role, len(r.roles))
+	copy(out, r.roles)
+	return out
+}
+
+// CurrentModel 返回当前模型 spec（供应商/模型名）。
+func (r *REPL) CurrentModel() string { return r.cfg.Model }
+
+// Config 返回当前配置（只读使用，修改请用 Reload）。
+func (r *REPL) Config() *config.Config { return r.cfg }
+
+// MemoryStore 返回角色记忆存储。
+func (r *REPL) MemoryStore() *memory.Store { return r.memory }
+
+// SessionStore 返回会话存储。
+func (r *REPL) SessionStore() *session.Store { return r.store }
+
+// PlanTasks 返回当前计划任务列表。
+func (r *REPL) PlanTasks() []tool.Task {
+	if r.plan == nil {
+		return nil
+	}
+	return r.plan.Tasks()
+}
+
+// ContextStats 返回上下文 token 用量与预算。
+func (r *REPL) ContextStats() (used, limit int) {
+	return r.contextTokens(), r.cfg.MaxContextTokens
+}
+
+// CostStats 返回本次会话的成本统计。
+func (r *REPL) CostStats() (turns, prompt, completion int, elapsed time.Duration) {
+	return r.usage.turns, r.usage.prompt, r.usage.completion, time.Since(r.started)
+}
+
+// CompactionCount 返回累计上下文压缩次数。
+func (r *REPL) CompactionCount() int { return r.compacts }
+
+// ToolNames 返回当前角色可见的工具名列表。
+func (r *REPL) ToolNames() []string { return r.registry.AllowedNames() }
+
+// AllToolNames 返回所有已注册工具名。
+func (r *REPL) AllToolNames() []string { return r.registry.AllToolNames() }
+
+// ToolDecision 返回某工具的当前权限判定。
+func (r *REPL) ToolDecision(name string) string { return r.registry.Decide(name).String() }
+
+// ToolDescription 返回某工具的描述，不存在时返回名称本身。
+func (r *REPL) ToolDescription(name string) string {
+	if t, ok := r.registry.Get(name); ok {
+		return t.Description()
+	}
+	return name
+}
+
+// AllowTool 临时放行某工具（本次运行内生效）。
+func (r *REPL) AllowTool(name string) error {
+	if _, ok := r.registry.Get(name); !ok {
+		return fmt.Errorf("未知工具 %s", name)
+	}
+	if !r.currentHas(name) {
+		return fmt.Errorf("角色 %s 未声明 %s", r.current.Name, name)
+	}
+	r.cfg.Permissions = setPerm(r.cfg.Permissions, name, "allow")
+	r.registry.SetPermissions(r.cfg.Permissions)
+	return nil
+}
+
+// CompactNow 立即压缩上下文。
+func (r *REPL) CompactNow() error { return r.compact(true) }
+
+// ClearHistory 清空对话历史（保留角色）。
+func (r *REPL) ClearHistory() { r.clearHistory() }
+
+// Undo 回退上一轮。
+func (r *REPL) Undo() { r.undo() }
+
+// ExitRequested 返回是否请求退出（EOF 等情况）。
+func (r *REPL) ExitRequested() bool { return r.exit }
+
+// SetExit 清除退出标志，供 Web 模式复用 REPL 实例时使用。
+func (r *REPL) SetExit(v bool) { r.exit = v }
 
 // roleDirs 返回角色搜索路径：随二进制分发的 roles/ 在前，用户项目里的 roles/ 可覆盖它。
 func (r *REPL) roleDirs() []string {
@@ -1037,7 +1293,11 @@ func (r *REPL) buildClient() *llm.Client {
 	if provider.APIKey == "" && !isLocal(provider.BaseURL) {
 		fmt.Fprintf(r.out, "  ⚠ 供应商 %s 没有 api_key，若为本地模型可忽略\n", firstProvider(r.cfg, provider.BaseURL))
 	}
-	return llm.New(provider.BaseURL, provider.APIKey, modelID)
+	client := llm.New(provider.BaseURL, provider.APIKey, modelID)
+	if r.cfg.Temperature != nil {
+		client.Temperature = r.cfg.Temperature
+	}
+	return client
 }
 
 func isLocal(baseURL string) bool {
@@ -1113,6 +1373,9 @@ func (r *REPL) printHelp() {
 		{"/reload", "重新读取 codecrew.json 并重建模型连接"},
 		{"/tools · /permissions · /allow <tool>", "查看工具授权情况、临时放行某工具"},
 		{"/plan", "查看模型拆解出来的任务计划"},
+		{"/pipeline <任务>", "流水线：架构师拆解→开发→审查→测试（中文 流水线）"},
+		{"/roundtable <话题> [轮数]", "圆桌讨论：多角色辩论后输出共识与分歧（中文 圆桌）"},
+		{"/memory [add <内容>|clear]", "角色长期记忆，自动注入 system prompt（中文 记忆）"},
 		{"/context · /compact", "查看上下文占用 / 立即压缩历史"},
 		{"/clear · /undo", "清空历史 / 回退上一轮"},
 		{"/sessions · /resume <id> · /new", "历史会话列表 / 续聊 / 新开会话"},

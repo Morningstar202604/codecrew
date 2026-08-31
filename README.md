@@ -15,6 +15,10 @@ CodeCrew 是一个单文件 Go 程序：把 OpenAI 兼容的任意模型（DeepS
 | **多模型通吃** | 一套配置兼容所有 OpenAI 兼容 API，含完全离线的 Ollama                         |
 | **完整 Agent 循环** | 模型调用工具 → 结果回填 `role:"tool"` → 再次推理，直到给出最终答复       |
 | **权限三档闸门** | allow / ask / deny 逐工具配置，破坏性命令强制二次确认，`--yes` 可全自动     |
+| **流水线编排** | `/pipeline` 一键启动 architect 拆解 → developer 写 → reviewer 审 → tester 测 |
+| **圆桌讨论** | `/roundtable` 多角色辩论 N 轮，输出共识、分歧与建议方案                       |
+| **角色长期记忆** | 每角色独立 Markdown 笔记，自动注入 system prompt，`/memory` 管理             |
+| **变更 diff 预览** | write / edit 前自动展示统一 diff（绿增红删），确认后才写入                  |
 | **上下文自治** | token 预算可视、超限自动摘要压缩历史，长任务不再撑爆窗口                      |
 | **会话持久化** | 每次对话落盘 JSONL，`/sessions`、`/resume`、`--session` 断点续聊             |
 | **配置即代码** | 项目级 `codecrew.json` > 全局 `~/.codecrew/config.json` > 环境变量，热重载   |
@@ -130,6 +134,73 @@ tools: [read, glob, grep]
 
 三层闸门依次判定：**角色白名单**（不在名单里 = deny，且不会下发给模型）→ **配置权限**（`permissions` / `/allow`）→ **交互确认**。命中破坏性特征（`rm -rf`、`git push --force`、`curl | sh`、`iex` 等）时无论怎么配置都会单独二次确认。
 
+`write` / `edit` 执行前会自动展示**统一 diff 预览**（新增行绿色、删除行红色），确认后才真正写入文件，避免误改。
+
+---
+
+## 🤝 团队协作模式
+
+### 流水线 `/pipeline <任务>`
+
+一键启动四阶段自动化流水线，每个阶段独立运行 Agent 循环，结果自动传递给下一阶段：
+
+```
+architect 拆解任务 → developer 编码实现 → reviewer 代码审查 → tester 测试验证
+```
+
+```bash
+> /pipeline 给用户模块增加密码重置功能
+  ⚙ 启动流水线：给用户模块增加密码重置功能
+  ── 阶段 1/4 · 架构师拆解任务
+  ...（架构师读代码、输出设计与任务拆解）
+  ── 阶段 2/4 · 开发工程师实现
+  ...（开发者按拆解逐项实现、跑构建）
+  ── 阶段 3/4 · 代码审查
+  ...（审查者检查改动、输出问题清单）
+  ── 阶段 4/4 · 测试验证
+  ...（测试者跑测试、补测试、输出结果）
+  ✓ 全部阶段完成
+```
+
+流水线结束后，完整的四阶段输出摘要会写入当前对话历史，可直接追问细节。
+
+### 圆桌讨论 `/roundtable <话题> [轮数]`
+
+architect / developer / reviewer 三个角色就同一话题辩论 N 轮（默认 2 轮，最多 5 轮），每轮每人基于之前所有发言给出自己的观点，最后由主持人输出：
+
+- **共识**：所有角色都同意的结论
+- **分歧**：角色之间的主要分歧点（注明谁支持、谁反对）
+- **建议方案**：综合各方观点后的推荐行动
+
+```bash
+> /roundtable 这个项目要不要从单体迁移到微服务 3
+  💬 圆桌讨论：这个项目要不要从单体迁移到微服务
+  参与角色：architect · developer · reviewer
+  讨论轮数：3 轮
+  ── 第 1/3 轮
+    ▸ architect ...
+    ▸ developer ...
+    ▸ reviewer ...
+  ── 第 2/3 轮
+    ...
+  ── 主持人总结
+  共识：...
+  分歧：...
+  建议方案：...
+```
+
+### 角色长期记忆 `/memory`
+
+每个角色独立维护一份 Markdown 笔记，持久化到 `~/.codecrew/memory/<role>.md`。记忆会**自动注入到该角色的 system prompt 末尾**，切换角色时自动加载，让角色"记住"之前项目中的经验和决策。
+
+```bash
+> /memory                    # 查看当前角色的记忆
+> /memory add 这个项目的测试用 httptest 起假服务  # 添加一条笔记
+> /memory clear              # 清空当前角色的记忆
+```
+
+架构师可以记技术决策、测试员可以记常见坑点、开发者可以记项目约定——每个角色在后续对话中都会自动参考这些笔记。
+
 ---
 
 ## 🎮 命令一览
@@ -144,6 +215,9 @@ tools: [read, glob, grep]
 | `/reload`                         | `重载`         | 重读配置并重建模型连接                     |
 | `/tools` `/permissions` `/allow <tool>` | `工具` `权限` | 查看授权情况、临时放行某工具              |
 | `/plan` `/plan <文字>`            | —              | 查看任务计划 / 手动加一条                  |
+| `/pipeline <任务>`                 | `流水线`       | 四阶段流水线：架构师拆解→开发→审查→测试    |
+| `/roundtable <话题> [轮数]`       | `圆桌`         | 多角色辩论 N 轮，输出共识与分歧             |
+| `/memory` `/memory add <内容>` `/memory clear` | `记忆` | 查看 / 添加 / 清空当前角色的长期记忆 |
 | `/context` `/compact`             | `上下文` `压缩` | 查看 token 占用 / 立即压缩历史             |
 | `/clear` `/undo`                  | `清空` `撤销`  | 清空历史（保留角色）/ 回退上一轮           |
 | `/sessions` `/resume <id>` `/new` | `会话` `恢复`  | 历史会话、续聊、新开会话                   |
@@ -205,12 +279,13 @@ tools: [read, glob, grep]
 ```
 cmd/codecrew/          # CLI 入口与参数
 internal/
-├── repl/              # 交互层：命令解析、Agent 循环、权限确认、上下文压缩
+├── repl/              # 交互层：命令解析、Agent 循环、权限确认、上下文压缩、流水线、圆桌
 ├── config/            # 分层配置、供应商解析、权限档位、密钥脱敏
 ├── role/              # 角色加载（内嵌默认为底，磁盘可覆盖）与 frontmatter 解析
 │   └── defaults/      # 内置角色 .md（go:embed）
 ├── llm/               # OpenAI 兼容客户端：SSE 流式、tool_calls 按槽位归并
-├── tool/              # 工具注册表 + read/write/edit/bash/glob/grep/plan
+├── tool/              # 工具注册表 + read/write/edit/bash/glob/grep/plan + diff 预览
+├── memory/            # 角色长期记忆：Markdown 笔记持久化、自动注入 system prompt
 ├── session/           # 会话 JSONL 落盘与续聊
 └── disp/              # 终端显示宽度（中英混排对齐）
 ```
@@ -237,8 +312,8 @@ gofmt -l .               # 应无输出
 | 版本       | 重点                                                             | 状态    |
 | ---------- | ---------------------------------------------------------------- | ------- |
 | v0.0.1     | MVP 骨架：REPL、角色、配置、流式、工具                           | ✅ 已发布 |
-| **v0.1.0** | Agent 循环修复、权限三档、glob/grep/plan、上下文压缩、会话持久化、测试与 CI | ✅ 本次 |
-| v0.2.0     | 流水线编排（/pipeline）、圆桌辩论、角色长期记忆                  | 📋 规划 |
+| v0.1.0     | Agent 循环修复、权限三档、glob/grep/plan、上下文压缩、会话持久化、测试与 CI | ✅ 已发布 |
+| v0.2.0     | 流水线编排、圆桌辩论、角色长期记忆、diff 预览                    | ✅ 已发布 |
 | v1.0.0     | 插件系统、i18n、成本可视化、基准测试套件                         | 📋 规划 |
 
 详见 [PLAN.md](PLAN.md) 与 [CHANGELOG.md](CHANGELOG.md)。

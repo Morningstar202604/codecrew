@@ -5,14 +5,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"codecrew/internal/config"
 	"codecrew/internal/repl"
+	"codecrew/internal/server"
 )
 
 // version 由构建时 -ldflags "-X main.version=vX.Y.Z" 注入。
-var version = "v0.1.0"
+var version = "v0.2.0"
 
 func main() {
 	var (
@@ -25,6 +27,9 @@ func main() {
 		flagPrint   = flag.String("print", "", "非交互模式：发送一条指令后退出")
 		flagNoColor = flag.Bool("no-color", false, "禁用彩色输出")
 		flagVer     = flag.Bool("version", false, "打印版本后退出")
+		flagServe   = flag.Bool("serve", false, "启动 Web 服务（浏览器访问）")
+		flagPort    = flag.String("port", "8080", "Web 服务端口（仅 --serve 时生效）")
+		flagAddr    = flag.String("addr", "", "Web 服务监听地址，默认 0.0.0.0（仅 --serve 时生效）")
 	)
 	flag.Usage = usage
 	flag.Parse()
@@ -54,6 +59,24 @@ func main() {
 	}
 	if *flagYes {
 		cfg.Permissions = mergePermissions(cfg.Permissions, map[string]string{"*": "allow"})
+	}
+
+	// Web 服务模式
+	if *flagServe {
+		addr := *flagAddr
+		if addr == "" {
+			addr = "0.0.0.0"
+		}
+		// 验证端口格式
+		portNum, err := strconv.Atoi(*flagPort)
+		if err != nil || portNum < 1 || portNum > 65535 {
+			fatal(fmt.Errorf("无效端口 %q，必须是 1-65535 的整数", *flagPort))
+		}
+		srv := server.NewServer(cfg, base)
+		if err := srv.ListenAndServe(addr + ":" + *flagPort); err != nil {
+			fatal(err)
+		}
+		return
 	}
 
 	app, err := repl.New(cfg, repl.Options{
@@ -104,11 +127,12 @@ func exeDir() string {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `CodeCrew — 终端里的 AI 开发团队
+	fmt.Fprint(os.Stderr, `CodeCrew — 终端里的 AI 开发团队 / Web 工作台
 
 用法:
-  codecrew [flags]
-  codecrew [flags] --print "你的问题"
+  codecrew [flags]                    终端交互模式
+  codecrew --serve [--port 8080]     Web 服务模式（浏览器访问）
+  codecrew [flags] --print "你的问题"  非交互单轮
 
 标志:
   --role <name>      启动角色（developer / reviewer / architect / tester / docs）
@@ -119,10 +143,13 @@ func usage() {
   --print <text>     非交互，单轮后退出
   --yes              跳过权限确认
   --no-color         关闭彩色输出
+  --serve            启动 Web 服务，浏览器访问 http://localhost:8080
+  --port <port>      Web 服务端口，默认 8080
+  --addr <addr>      Web 服务监听地址，默认 0.0.0.0
   --version          打印版本
   -h, --help         显示本帮助
 
-进入交互后输入 /help 查看全部命令。
+终端模式输入 /help 查看全部命令。
 `)
 }
 

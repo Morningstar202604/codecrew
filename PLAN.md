@@ -1,6 +1,6 @@
 # CodeCrew 项目总规划
 
-> **当前版本**: v0.1.0
+> **当前版本**: v0.2.0
 > **定位**: 终端原生、多角色协作、权限可控的 AI 编程助手
 > **核心理念**: 像指挥一个开发团队一样指挥 AI —— 有分工、有流程、有质检
 
@@ -22,11 +22,12 @@
 ```
 codecrew (单二进制)
 ├── cmd/codecrew          CLI 入口：参数解析、配置装载、启动 REPL
-├── internal/repl         交互层：命令系统、Agent 循环、权限确认、上下文压缩、成本统计
+├── internal/repl         交互层：命令系统、Agent 循环、权限确认、上下文压缩、成本统计、流水线、圆桌
 ├── internal/config       分层配置（项目 > 全局 > 环境变量）、供应商解析、密钥脱敏
 ├── internal/role         角色加载：内嵌默认为底 + 磁盘覆盖，frontmatter 解析
 ├── internal/llm          OpenAI 兼容客户端：SSE 流式、tool_calls 按槽位归并、token 统计
-├── internal/tool         注册表 + read/write/edit/bash/glob/grep/plan + 三层权限闸门
+├── internal/tool         注册表 + read/write/edit/bash/glob/grep/plan + diff 预览 + 三层权限闸门
+├── internal/memory       角色长期记忆：Markdown 笔记持久化、自动注入 system prompt
 ├── internal/session      会话 JSONL 落盘 / 续聊
 └── internal/disp         终端显示宽度（中英混排对齐）
 ```
@@ -60,14 +61,14 @@ REPL、角色、配置、流式输出、四个工具、欢迎页与中文别名�
 
 ## 🗺️ 后续路线图
 
-### v0.2.0 — 团队化协作
+### v0.2.0 — 团队化协作（已完成）
 
-| 任务             | 优先级 | 说明                                                                     |
-| ---------------- | ------ | ------------------------------------------------------------------------ |
-| **流水线编排**   | P0     | `/pipeline 实现 X` → architect 拆解 → developer 写 → reviewer 审 → tester 测 |
-| **圆桌模式**     | P1     | 多角色就同一设计辩论 N 轮再动手，输出决议与分歧点                        |
-| **角色长期记忆** | P1     | 每角色维护笔记（架构师记决策、测试员记坑点），可 `/memory` 查看         |
-| **diff 预览**    | P1     | write/edit 前展示统一 diff，逐块确认                                     |
+| 任务             | 优先级 | 说明                                                                     | 状态 |
+| ---------------- | ------ | ------------------------------------------------------------------------ | ---- |
+| **流水线编排**   | P0     | `/pipeline 实现 X` → architect 拆解 → developer 写 → reviewer 审 → tester 测 | ✅ |
+| **圆桌模式**     | P1     | 多角色就同一设计辩论 N 轮再动手，输出决议与分歧点                        | ✅ |
+| **角色长期记忆** | P1     | 每角色维护笔记（架构师记决策、测试员记坑点），可 `/memory` 查看         | ✅ |
+| **diff 预览**    | P1     | write/edit 前展示统一 diff，逐块确认                                     | ✅ |
 
 ### v1.0.0 — 生产级打磨
 
