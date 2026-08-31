@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CodeCrew — AI 开发工作台</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+</head>
+<body>
+
+<!-- 左侧边栏 -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-header">
+    <div class="logo">
+      <span class="logo-icon">⚡</span>
+      <span class="logo-text">CodeCrew</span>
+    </div>
+    <button class="icon-btn sidebar-toggle" id="sidebarClose" title="收起侧边栏">✕</button>
+  </div>
+
+  <button class="new-chat-btn" id="newChatBtn">
+    <span class="btn-icon">+</span> 新建对话
+  </button>
+
+  <div class="sidebar-section">
+    <div class="section-label">历史会话</div>
+    <div class="session-list" id="sessionList">
+      <div class="session-empty">暂无历史会话</div>
+    </div>
+  </div>
+
+  <div class="sidebar-footer">
+    <div class="role-selector-wrap">
+      <div class="section-label">当前角色</div>
+      <select class="role-selector" id="roleSelector">
+        <option value="developer">developer</option>
+      </select>
+    </div>
+    <div class="model-display" id="modelDisplay">
+      <span class="model-dot"></span>
+      <span id="modelName">未配置</span>
+    </div>
+  </div>
+</aside>
+
+<!-- 侧边栏遮罩（移动端） -->
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<!-- 主区域 -->
+<main class="main">
+  <!-- 顶部栏 -->
+  <header class="topbar">
+    <button class="icon-btn" id="sidebarOpen" title="打开侧边栏">☰</button>
+    <div class="topbar-title">
+      <span id="currentRoleLabel">developer</span>
+      <span class="topbar-sep">·</span>
+      <span id="currentModelLabel">未配置模型</span>
+    </div>
+    <div class="topbar-actions">
+      <button class="icon-btn" id="panelToggle" title="功能面板">⚙</button>
+    </div>
+  </header>
+
+  <!-- 对话区域 -->
+  <div class="chat-container" id="chatContainer">
+    <div class="welcome-screen" id="welcomeScreen">
+      <div class="welcome-icon">⚡</div>
+      <h1>CodeCrew</h1>
+      <p class="welcome-sub">你的 AI 开发团队 — 有分工、有流程、有质检</p>
+      <div class="welcome-cards">
+        <div class="welcome-card" data-prompt="帮我分析这个项目的代码结构">
+          <div class="card-icon">🔍</div>
+          <div class="card-title">分析代码</div>
+          <div class="card-desc">读懂项目结构与依赖</div>
+        </div>
+        <div class="welcome-card" data-prompt="/pipeline 给项目添加单元测试">
+          <div class="card-icon">🏗</div>
+          <div class="card-title">流水线任务</div>
+          <div class="card-desc">架构→开发→审查→测试</div>
+        </div>
+        <div class="welcome-card" data-prompt="/roundtable 这个项目要不要引入 ORM 框架">
+          <div class="card-icon">💬</div>
+          <div class="card-title">圆桌讨论</div>
+          <div class="card-desc">多角色辩论出共识</div>
+        </div>
+        <div class="welcome-card" data-prompt="/memory">
+          <div class="card-icon">📝</div>
+          <div class="card-title">角色记忆</div>
+          <div class="card-desc">查看和管理长期笔记</div>
+        </div>
+      </div>
+    </div>
+    <div class="messages" id="messages"></div>
+  </div>
+
+  <!-- 输入区域 -->
+  <div class="input-area">
+    <div class="input-wrapper">
+      <textarea id="messageInput" placeholder="输入消息，或用 / 开头执行命令（/pipeline、/roundtable、/memory...）" rows="1"></textarea>
+      <button class="send-btn" id="sendBtn" title="发送">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+        </svg>
+      </button>
+    </div>
+    <div class="input-hint">
+      <span>Enter 发送 · Shift+Enter 换行</span>
+      <span class="hint-sep">·</span>
+      <span id="contextHint">上下文: -</span>
+    </div>
+  </div>
+</main>
+
+<!-- 右侧功能面板 -->
+<aside class="right-panel" id="rightPanel">
+  <div class="panel-header">
+    <span class="panel-title">功能面板</span>
+    <button class="icon-btn" id="panelClose" title="关闭">✕</button>
+  </div>
+  <div class="panel-tabs">
+    <button class="panel-tab active" data-tab="tools">工具</button>
+    <button class="panel-tab" data-tab="memory">记忆</button>
+    <button class="panel-tab" data-tab="plan">计划</button>
+    <button class="panel-tab" data-tab="config">配置</button>
+    <button class="panel-tab" data-tab="stats">统计</button>
+  </div>
+  <div class="panel-content">
+    <!-- 工具 -->
+    <div class="panel-pane active" id="pane-tools">
+      <div class="pane-section">
+        <div class="pane-label">可用工具与权限</div>
+        <div id="toolsList" class="tools-list"></div>
+      </div>
+      <div class="pane-section">
+        <div class="pane-label">快捷操作</div>
+        <div class="action-grid">
+          <button class="action-btn" data-action="clear">清空对话</button>
+          <button class="action-btn" data-action="undo">撤销上轮</button>
+          <button class="action-btn" data-action="compact">压缩上下文</button>
+          <button class="action-btn" data-action="reload">重载配置</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 记忆 -->
+    <div class="panel-pane" id="pane-memory">
+      <div class="pane-section">
+        <div class="pane-label">角色选择</div>
+        <select class="role-selector" id="memoryRoleSelector"></select>
+      </div>
+      <div class="pane-section">
+        <div class="pane-label">记忆内容</div>
+        <div class="memory-content" id="memoryContent">加载中...</div>
+      </div>
+      <div class="pane-section">
+        <div class="pane-label">添加笔记</div>
+        <textarea class="memory-input" id="memoryInput" placeholder="输入要记住的内容..." rows="3"></textarea>
+        <div class="memory-actions">
+          <button class="primary-btn" id="memoryAddBtn">添加</button>
+          <button class="danger-btn" id="memoryClearBtn">清空</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 计划 -->
+    <div class="panel-pane" id="pane-plan">
+      <div class="pane-section">
+        <div class="pane-label">任务计划</div>
+        <div id="planList" class="plan-list">
+          <div class="empty-text">暂无计划任务</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 配置 -->
+    <div class="panel-pane" id="pane-config">
+      <div class="pane-section">
+        <div class="pane-label">模型配置</div>
+        <div id="configProviders" class="config-list"></div>
+      </div>
+      <div class="pane-section">
+        <div class="pane-label">切换模型</div>
+        <select class="role-selector" id="modelSelector"></select>
+        <button class="primary-btn" id="modelSwitchBtn" style="margin-top:8px">切换</button>
+      </div>
+      <div class="pane-section">
+        <div class="pane-label">运行参数</div>
+        <div id="configParams" class="config-params"></div>
+      </div>
+    </div>
+
+    <!-- 统计 -->
+    <div class="panel-pane" id="pane-stats">
+      <div class="pane-section">
+        <div class="pane-label">上下文</div>
+        <div class="stat-row">
+          <span>已用</span><span id="statContextUsed">-</span>
+        </div>
+        <div class="stat-row">
+          <span>预算</span><span id="statContextLimit">-</span>
+        </div>
+        <div class="stat-row">
+          <span>消息数</span><span id="statMessages">-</span>
+        </div>
+        <div class="stat-row">
+          <span>压缩次数</span><span id="statCompactions">-</span>
+        </div>
+      </div>
+      <div class="pane-section">
+        <div class="pane-label">成本</div>
+        <div class="stat-row">
+          <span>模型调用</span><span id="statTurns">-</span>
+        </div>
+        <div class="stat-row">
+          <span>输入 tokens</span><span id="statPrompt">-</span>
+        </div>
+        <div class="stat-row">
+          <span>输出 tokens</span><span id="statCompletion">-</span>
+        </div>
+        <div class="stat-row">
+          <span>总计 tokens</span><span id="statTotal">-</span>
+        </div>
+        <div class="stat-row">
+          <span>运行时长</span><span id="statElapsed">-</span>
+        </div>
+      </div>
+      <div class="pane-section">
+        <button class="primary-btn" id="refreshStatsBtn">刷新统计</button>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- 右侧面板遮罩（移动端） -->
+<div class="panel-overlay" id="panelOverlay"></div>
+
+<!-- Toast 通知 -->
+<div class="toast" id="toast"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
