@@ -16,6 +16,7 @@ import (
 	"codecrew/internal/disp"
 	"codecrew/internal/llm"
 	"codecrew/internal/memory"
+	"codecrew/internal/reasoning"
 	"codecrew/internal/role"
 	"codecrew/internal/session"
 	"codecrew/internal/tool"
@@ -55,6 +56,11 @@ type REPL struct {
 	plan     *tool.PlanTool
 	started  time.Time
 	compacts int
+
+	reasoningCfg reasoning.Config           // 推理配置
+	reflexion    *reasoning.ReflexionEngine // 反思引擎
+	failureStore *reasoning.FailureStore    // 失败经验存储
+	thoughts     []string                   // 当前轮的思考过程
 }
 
 type usageTracker struct {
@@ -96,6 +102,8 @@ func New(cfg *config.Config, opt Options) (*REPL, error) {
 	r.plan = findPlanner(r.registry)
 	r.applyRole(current)
 	r.client = r.buildClient()
+	// 初始化推理配置和失败存储（必须在创建 history 之前，这样 systemPromptFor 才能读取推理配置）
+	r.initReasoning()
 	r.history = []llm.Message{llm.TextMessage("system", r.systemPromptFor(current))}
 
 	if store, err := session.DefaultStore(); err == nil {
@@ -107,6 +115,141 @@ func New(cfg *config.Config, opt Options) (*REPL, error) {
 	}
 	r.registry.SetApprover(r.approve)
 	return r, nil
+}
+
+// llmAdapter 将 llm.Client 适配为 reasoning.LLMClient 接口。
+type llmAdapter struct {
+	client *llm.Client
+}
+
+func (a *llmAdapter) Complete(ctx context.Context, messages []reasoning.ChatMessage) (string, error) {
+	llmMessages := make([]llm.Message, len(messages))
+	for i, m := range messages {
+		llmMessages[i] = llm.TextMessage(m.Role, m.Content)
+	}
+	return a.client.Complete(ctx, llmMessages)
+}
+
+// initReasoning 初始化推理配置、失败存储和反思引擎。
+func (r *REPL) initReasoning() {
+	cfg := r.cfg.Reasoning
+	r.reasoningCfg = reasoning.Config{
+		Mode:              reasoning.ParseMode(cfg.Mode),
+		ShowThoughts:      cfg.GetShowThoughts(),
+		AutoReflect:       cfg.GetAutoReflect(),
+		ReflectionDepth:   cfg.ReflectionDepth,
+		InjectReflections: cfg.GetInjectReflections(),
+	}
+	r.reasoningCfg.Validate()
+	// 失败存储
+	if base, err := os.UserHomeDir(); err == nil {
+		r.failureStore = reasoning.NewFailureStore(filepath.Join(base, ".codecrew"))
+	}
+	// 反思引擎（如果 client 已初始化）
+	if r.client != nil {
+		r.reflexion = reasoning.NewReflexionEngine(&llmAdapter{client: r.client}, r.reasoningCfg, r.failureStore)
+	}
+}
+
+// rebuildReflexion 在 client 变化后重建反思引擎。
+func (r *REPL) rebuildReflexion() {
+	if r.client != nil {
+		r.reflexion = reasoning.NewReflexionEngine(&llmAdapter{client: r.client}, r.reasoningCfg, r.failureStore)
+	}
+}
+
+// triggerReflexion 触发反思（如果配置允许）。
+func (r *REPL) triggerReflexion(ctx context.Context, task, summary string, failed bool) {
+	if r.reflexion == nil || !r.reflexion.ShouldReflect(failed) {
+		return
+	}
+	roleName := r.current.Name
+	if summary == "" {
+		summary = "（无输出摘要）"
+	}
+	fmt.Fprintf(r.out, "\n  %s\n", dim("🔄 自我反思中..."))
+	result := r.reflexion.Reflect(ctx, task, summary, roleName, failed)
+	if result.Error != nil {
+		fmt.Fprintf(r.out, "  %s\n", dim("反思失败: "+result.Error.Error()))
+		return
+	}
+	if result.Content == "" {
+		return
+	}
+	if failed {
+		fmt.Fprintf(r.out, "  %s\n", "📝 失败反思：")
+	} else {
+		fmt.Fprintf(r.out, "  %s\n", "📝 执行反思：")
+	}
+	for _, line := range strings.Split(result.Content, "\n") {
+		if strings.TrimSpace(line) != "" {
+			fmt.Fprintf(r.out, "    %s\n", dim(line))
+		}
+	}
+	fmt.Fprintf(r.out, "  %s\n", dim(fmt.Sprintf("（反思耗时 %s，已存入 %s 的经验库）", result.Duration.Round(time.Millisecond), roleName)))
+}
+
+// handleReasoning 处理 /reasoning 命令，查看或切换推理模式。
+func (r *REPL) handleReasoning(arg string) {
+	if arg == "" {
+		fmt.Fprintf(r.out, "\n  当前推理模式: %s\n", bright(r.reasoningCfg.Mode.String()))
+		fmt.Fprintf(r.out, "  显示思考过程: %v\n", r.reasoningCfg.ShowThoughts)
+		fmt.Fprintf(r.out, "  自动反思: %v\n", r.reasoningCfg.AutoReflect)
+		fmt.Fprintf(r.out, "  反思深度: %d\n", r.reasoningCfg.ReflectionDepth)
+		fmt.Fprintln(r.out, "  支持模式:")
+		fmt.Fprintln(r.out, "    standard  - 标准模式（隐式 ReAct，现有行为）")
+		fmt.Fprintln(r.out, "    react     - 显式 ReAct（Thought → Action → Observation）")
+		fmt.Fprintln(r.out, "    reflexion - 反思模式（任务完成后自动反思，失败时深度反思）")
+		fmt.Fprintln(r.out, "  用法: /reasoning <模式>")
+		return
+	}
+	mode := reasoning.ParseMode(arg)
+	r.reasoningCfg.Mode = mode
+	r.rebuildReflexion()
+	// 重新应用角色（更新 system prompt）
+	r.applyRole(r.current)
+	r.history[0] = llm.TextMessage("system", r.systemPromptFor(r.current))
+	fmt.Fprintf(r.out, "\n  ✓ 推理模式已切换为: %s\n", bright(mode.String()))
+	if mode == reasoning.ModeReAct || mode == reasoning.ModeReflexion {
+		fmt.Fprintln(r.out, "  模型将显式输出思考过程（Thought:），任务完成后自动反思")
+	}
+}
+
+// handleFailures 处理 /failures 命令，查看或清空失败经验。
+func (r *REPL) handleFailures(arg string) {
+	if r.failureStore == nil {
+		fmt.Fprintln(r.out, "\n  ⚠ 失败经验存储不可用")
+		return
+	}
+	if arg == "clear" {
+		if err := r.failureStore.Clear(r.current.Name); err != nil {
+			fmt.Fprintf(r.out, "\n  ✗ 清空失败: %v\n", err)
+		} else {
+			fmt.Fprintf(r.out, "\n  ✓ 已清空 %s 的失败经验\n", r.current.Name)
+		}
+		return
+	}
+	list, err := r.failureStore.List(r.current.Name)
+	if err != nil {
+		fmt.Fprintf(r.out, "\n  ✗ 读取失败经验: %v\n", err)
+		return
+	}
+	if len(list) == 0 {
+		fmt.Fprintf(r.out, "\n  %s 还没有失败经验\n", r.current.Name)
+		return
+	}
+	fmt.Fprintf(r.out, "\n  %s 的失败经验（共 %d 条，最新在前）:\n", r.current.Name, len(list))
+	for i, f := range list[:min(10, len(list))] {
+		fmt.Fprintf(r.out, "    %d. [%s] %s\n", i+1, f.Timestamp.Format("2006-01-02 15:04"), disp.Truncate(f.Task, 50))
+		fmt.Fprintf(r.out, "       错误: %s\n", dim(disp.Truncate(f.Error, 80)))
+		if f.Reflection != "" {
+			fmt.Fprintf(r.out, "       反思: %s\n", dim(disp.Truncate(f.Reflection, 80)))
+		}
+	}
+	if len(list) > 10 {
+		fmt.Fprintf(r.out, "    ... 还有 %d 条\n", len(list)-10)
+	}
+	fmt.Fprintln(r.out, "  用法: /failures clear 清空失败经验")
 }
 
 func findPlanner(reg *tool.Registry) *tool.PlanTool {
@@ -206,6 +349,10 @@ func (r *REPL) handleInput(input string) {
 		r.undo()
 	case "cost":
 		r.printCost()
+	case "reasoning":
+		r.handleReasoning(arg)
+	case "failures":
+		r.handleFailures(arg)
 	case "sessions":
 		r.listSessions()
 	case "resume":
@@ -275,11 +422,55 @@ func (r *REPL) runTurn(userInput string) {
 		maxRounds = 12
 	}
 
+	// ReAct 模式：维护 Thought 显示状态
+	inThought := false
+	thoughtBuffer := ""
+	r.thoughts = nil
+
 	for round := 0; round < maxRounds; round++ {
 		if round > 0 {
-			fmt.Fprintln(r.out) // 工具执行完，与模型的新一段回复之间留一行
+			fmt.Fprintln(r.out)
 		}
 		text, calls, usage, err := r.client.Chat(ctx, r.history, r.registry.Schemas(), func(delta string) {
+			// ReAct 模式：检测 Thought 前缀，用不同样式显示
+			if r.reasoningCfg.Mode == reasoning.ModeReAct || r.reasoningCfg.Mode == reasoning.ModeReflexion {
+				thoughtBuffer += delta
+				if !inThought {
+					trimmed := strings.TrimSpace(thoughtBuffer)
+					if strings.HasPrefix(trimmed, "Thought:") {
+						inThought = true
+						fmt.Fprint(r.out, "\n  "+dim("💭 "))
+						rest := strings.TrimPrefix(trimmed, "Thought:")
+						if rest != "" {
+							fmt.Fprint(r.out, dim(rest))
+						}
+						thoughtBuffer = ""
+						return
+					}
+					if len(thoughtBuffer) > 200 {
+						fmt.Fprint(r.out, thoughtBuffer)
+						thoughtBuffer = ""
+					}
+				} else {
+					if strings.Contains(delta, "\n") {
+						if strings.Contains(thoughtBuffer, "Action:") || strings.Contains(thoughtBuffer, "Final Answer:") {
+							inThought = false
+							fmt.Fprintln(r.out)
+							thoughtBuffer = ""
+							return
+						}
+						if strings.HasSuffix(thoughtBuffer, "\n\n") {
+							inThought = false
+							fmt.Fprintln(r.out)
+							thoughtBuffer = ""
+							return
+						}
+					}
+					thoughtBuffer += delta
+					fmt.Fprint(r.out, dim(delta))
+					return
+				}
+			}
 			fmt.Fprint(r.out, delta)
 		})
 		if err != nil {
@@ -289,6 +480,8 @@ func (r *REPL) runTurn(userInput string) {
 				r.history = append(r.history, msg)
 				r.appendSession(msg)
 			}
+			// 失败时触发深度反思
+			r.triggerReflexion(ctx, userInput, text, true)
 			return
 		}
 		if usage != nil {
@@ -306,6 +499,8 @@ func (r *REPL) runTurn(userInput string) {
 		r.appendSession(llm.Message{Role: "assistant", Content: text, ToolCalls: calls})
 
 		if len(calls) == 0 {
+			// 任务完成，触发反思
+			r.triggerReflexion(ctx, userInput, text, false)
 			return
 		}
 		if err := r.runToolCalls(ctx, calls); err != nil {
@@ -314,6 +509,8 @@ func (r *REPL) runTurn(userInput string) {
 	}
 	fmt.Fprintf(r.out, "\n  ⚠ 已达到单轮最多 %d 次工具调用的上限（可用 max_tool_rounds 调整）\n", maxRounds)
 	r.history = append(r.history, llm.TextMessage("system", fmt.Sprintf("（本轮工具调用达到 %d 次上限，已暂停，请人工确认后续步骤）", maxRounds)))
+	// 达到上限视为失败，触发深度反思
+	r.triggerReflexion(ctx, userInput, "", true)
 }
 
 func (r *REPL) runToolCalls(ctx context.Context, calls []llm.ToolCall) error {
@@ -647,6 +844,16 @@ func (r *REPL) systemPromptFor(target role.Role) string {
 			prompt = memory.InjectPrompt(prompt, mem)
 		}
 	}
+	// ReAct 模式：添加显式推理格式指令
+	if r.reasoningCfg.Mode == reasoning.ModeReAct || r.reasoningCfg.Mode == reasoning.ModeReflexion {
+		prompt += "\n" + reasoning.ReActSystemPrompt()
+	}
+	// 注入历史反思经验
+	if r.reasoningCfg.InjectReflections && r.reflexion != nil {
+		if reflections := r.reflexion.InjectReflections(target.Name); reflections != "" {
+			prompt += reflections
+		}
+	}
 	return prompt
 }
 
@@ -662,6 +869,7 @@ func (r *REPL) switchModel(spec string) {
 	}
 	r.cfg.Model = spec
 	r.client = llm.New(provider.BaseURL, provider.APIKey, modelID)
+	r.rebuildReflexion()
 	fmt.Fprintf(r.out, "  ✓ 已切换模型: %s → %s\n", bright(spec), provider.BaseURL)
 }
 
@@ -676,6 +884,7 @@ func (r *REPL) reload() {
 	r.plan = findPlanner(r.registry)
 	r.applyRole(r.current)
 	r.client = r.buildClient()
+	r.initReasoning()
 	r.printReloaded()
 }
 

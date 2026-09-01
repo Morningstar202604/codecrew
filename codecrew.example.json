@@ -51,5 +51,14 @@
   "max_tool_rounds": 12,
 
   "//working_dir": "可选：工具读写与命令执行的根目录，默认取当前目录，也可用 --cwd 或 CREW_WORKING_DIR 指定",
-  "working_dir": ""
+  "working_dir": "",
+
+  "//reasoning": "推理范式：standard(标准)/react(显式ReAct)/reflexion(自我反思)。reflexion 模式下任务完成后自动反思，失败时深度反思，经验存入角色记忆库",
+  "reasoning": {
+    "mode": "standard",
+    "show_thoughts": true,
+    "auto_reflect": true,
+    "reflection_depth": 1,
+    "inject_reflections": true
+  }
 }

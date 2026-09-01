@@ -17,6 +17,49 @@ type Provider struct {
 	Models  []string `json:"models,omitempty"`
 }
 
+// ReasoningConfig 推理范式配置。
+type ReasoningConfig struct {
+	// Mode 推理模式：standard / react / reflexion，默认 standard。
+	Mode string `json:"mode,omitempty"`
+	// ShowThoughts 是否显示思考过程，默认 true。
+	ShowThoughts *bool `json:"show_thoughts,omitempty"`
+	// AutoReflect 是否自动反思（仅 reflexion 模式），默认 true。
+	AutoReflect *bool `json:"auto_reflect,omitempty"`
+	// ReflectionDepth 反思深度 1-3，默认 1。
+	ReflectionDepth int `json:"reflection_depth,omitempty"`
+	// InjectReflections 是否注入历史反思，默认 true。
+	InjectReflections *bool `json:"inject_reflections,omitempty"`
+}
+
+// Enabled 返回是否启用了非标准推理模式。
+func (c ReasoningConfig) Enabled() bool {
+	return c.Mode != "" && c.Mode != "standard"
+}
+
+// GetShowThoughts 返回是否显示思考过程。
+func (c ReasoningConfig) GetShowThoughts() bool {
+	if c.ShowThoughts == nil {
+		return true
+	}
+	return *c.ShowThoughts
+}
+
+// GetAutoReflect 返回是否自动反思。
+func (c ReasoningConfig) GetAutoReflect() bool {
+	if c.AutoReflect == nil {
+		return true
+	}
+	return *c.AutoReflect
+}
+
+// GetInjectReflections 返回是否注入历史反思。
+func (c ReasoningConfig) GetInjectReflections() bool {
+	if c.InjectReflections == nil {
+		return true
+	}
+	return *c.InjectReflections
+}
+
 // Config 是 CodeCrew 的全部可配置项。
 type Config struct {
 	// Model 形如 "供应商/模型名"，例如 deepseek/deepseek-chat。
@@ -28,7 +71,9 @@ type Config struct {
 	MaxContextTokens int               `json:"max_context_tokens,omitempty"`
 	MaxToolRounds    int               `json:"max_tool_rounds,omitempty"`
 	Temperature      *float64          `json:"temperature,omitempty"`
-	Source           string            `json:"-"` // 实际加载到的文件，仅用于展示
+	// Reasoning 推理范式配置（standard / react / reflexion）。
+	Reasoning ReasoningConfig `json:"reasoning,omitempty"`
+	Source    string          `json:"-"` // 实际加载到的文件，仅用于展示
 }
 
 func (c *Config) defaults() {
@@ -142,6 +187,22 @@ func merge(dst, src *Config) {
 	}
 	if src.Temperature != nil {
 		dst.Temperature = src.Temperature
+	}
+	// 合并 Reasoning 配置
+	if src.Reasoning.Mode != "" {
+		dst.Reasoning.Mode = src.Reasoning.Mode
+	}
+	if src.Reasoning.ShowThoughts != nil {
+		dst.Reasoning.ShowThoughts = src.Reasoning.ShowThoughts
+	}
+	if src.Reasoning.AutoReflect != nil {
+		dst.Reasoning.AutoReflect = src.Reasoning.AutoReflect
+	}
+	if src.Reasoning.ReflectionDepth > 0 {
+		dst.Reasoning.ReflectionDepth = src.Reasoning.ReflectionDepth
+	}
+	if src.Reasoning.InjectReflections != nil {
+		dst.Reasoning.InjectReflections = src.Reasoning.InjectReflections
 	}
 }
 
