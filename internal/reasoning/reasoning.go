@@ -31,6 +31,8 @@ const (
 	ModeReAct Mode = "react"
 	// ModeReflexion 反思模式，任务完成后自动反思，失败时深度反思。
 	ModeReflexion Mode = "reflexion"
+	// ModeCoT 链式思考模式，显式展示推理步骤。
+	ModeCoT Mode = "cot"
 )
 
 // ParseMode 解析推理模式字符串，不区分大小写。
@@ -78,7 +80,11 @@ func DefaultConfig() Config {
 
 // Validate 校验并修正配置。
 func (c *Config) Validate() {
-	if c.Mode == "" {
+	// 验证并修正模式
+	switch c.Mode {
+	case ModeStandard, ModeReAct, ModeReflexion, ModeCoT:
+		// 有效模式
+	default:
 		c.Mode = ModeStandard
 	}
 	if c.ReflectionDepth < 1 {

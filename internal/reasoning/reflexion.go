@@ -1,6 +1,7 @@
 package reasoning
 
 import (
+	"codecrew/internal/llm"
 	"context"
 	"fmt"
 	"strings"
@@ -14,11 +15,8 @@ type LLMClient interface {
 	Complete(ctx context.Context, messages []ChatMessage) (string, error)
 }
 
-// ChatMessage 是简化的聊天消息，用于反思引擎。
-type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
+// ChatMessage 聊天消息（复用 llm 包的通用类型）。
+type ChatMessage = llm.ChatMessage
 
 // ReflexionEngine 反思引擎，负责触发反思、调用模型、存储结果。
 type ReflexionEngine struct {
