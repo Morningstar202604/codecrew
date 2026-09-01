@@ -1,6 +1,6 @@
 # 参与贡献
 
-感谢关注 CodeCrew。项目当前处于开发阶段（v0.1.0），欢迎提 Issue 和 PR。
+感谢关注 CodeCrew。项目当前版本 v1.0.6，欢迎提 Issue 和 PR。
 
 ## 起步
 
@@ -26,4 +26,4 @@ go test ./...
 
 ## 许可
 
-提交即表示你的贡献按 Apache License 2.0 授权。请勿提交任何密钥（`codecrew.json` 已在 `.gitignore`）。
+提交即表示你的贡献按 MIT License 授权。请勿提交任何密钥（`codecrew.json` 已在 `.gitignore`）。

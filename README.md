@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.svg" alt="CodeCrew" width="120" height="120" style="border-radius:24px"/>
+</p>
+
 # CodeCrew — 你的 AI 开发团队
 
 > 像指挥一个开发团队一样指挥 AI —— 有分工、有流程、有质检。
