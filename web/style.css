@@ -791,6 +791,8 @@ body {
 }
 .stat-row span:first-child { color: var(--text-muted); }
 .stat-row span:last-child { font-weight: 500; font-family: var(--font-mono); }
+.stat-cost { padding-top: 10px; margin-top: 6px; border-top: 1px solid var(--border); }
+.stat-cost span:last-child { font-size: 15px; font-weight: 600; }
 
 /* ===== 遮罩 ===== */
 .sidebar-overlay, .panel-overlay {

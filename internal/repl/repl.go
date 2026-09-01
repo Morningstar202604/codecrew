@@ -14,7 +14,9 @@ import (
 
 	"codecrew/internal/config"
 	"codecrew/internal/disp"
+	"codecrew/internal/i18n"
 	"codecrew/internal/llm"
+	"codecrew/internal/mcp"
 	"codecrew/internal/memory"
 	"codecrew/internal/role"
 	"codecrew/internal/session"
@@ -55,6 +57,9 @@ type REPL struct {
 	plan     *tool.PlanTool
 	started  time.Time
 	compacts int
+
+	mcpClients []*mcp.Client // MCP 服务器客户端，关闭时清理
+	lang       i18n.Language // 界面语言
 }
 
 type usageTracker struct {
@@ -94,9 +99,13 @@ func New(cfg *config.Config, opt Options) (*REPL, error) {
 	}
 	r.registry = tool.NewDefaultRegistry(cfg.WorkDir())
 	r.plan = findPlanner(r.registry)
+	r.lang = i18n.Parse(cfg.Language)
 	r.applyRole(current)
 	r.client = r.buildClient()
 	r.history = []llm.Message{llm.TextMessage("system", r.systemPromptFor(current))}
+
+	// 连接 MCP 服务器并注册工具
+	r.connectMCPServers()
 
 	if store, err := session.DefaultStore(); err == nil {
 		r.store = store
@@ -116,6 +125,76 @@ func findPlanner(reg *tool.Registry) *tool.PlanTool {
 		}
 	}
 	return nil
+}
+
+// connectMCPServers 连接配置中的 MCP 服务器，注册它们提供的工具。
+// 连接失败的服务器会被跳过并打印警告，不影响其他功能。
+func (r *REPL) connectMCPServers() {
+	if len(r.cfg.MCPServers) == 0 {
+		return
+	}
+	for name, srv := range r.cfg.MCPServers {
+		if srv.Disabled || srv.Command == "" {
+			continue
+		}
+		client, err := mcp.NewClient(srv.Command, srv.Args...)
+		if err != nil {
+			fmt.Fprintf(r.out, "  ⚠ MCP 服务器 %q 连接失败: %v\n", name, err)
+			continue
+		}
+		tools, err := client.ListTools()
+		if err != nil {
+			fmt.Fprintf(r.out, "  ⚠ MCP 服务器 %q 获取工具列表失败: %v\n", name, err)
+			client.Close()
+			continue
+		}
+		registered := 0
+		for _, t := range tools {
+			adapter := mcp.NewToolAdapter(client, t)
+			// MCP 工具默认 ask 权限，需要用户确认
+			r.registry.Register(adapter, tool.DecisionAsk)
+			registered++
+		}
+		r.mcpClients = append(r.mcpClients, client)
+		fmt.Fprintf(r.out, "  ✓ MCP 服务器 %q (%s v%s)：注册 %d 个工具\n",
+			name, client.ServerName(), client.ServerVersion(), registered)
+	}
+}
+
+// CloseMCP 关闭所有 MCP 服务器连接。
+func (r *REPL) CloseMCP() {
+	for _, c := range r.mcpClients {
+		c.Close()
+	}
+	r.mcpClients = nil
+}
+
+// T 返回当前语言的翻译。args 可选，用于格式化。
+func (r *REPL) T(key string, args ...any) string {
+	return i18n.T(r.lang, key, args...)
+}
+
+// Language 返回当前界面语言。
+func (r *REPL) Language() i18n.Language { return r.lang }
+
+// SetLanguage 设置界面语言。
+func (r *REPL) SetLanguage(lang i18n.Language) { r.lang = lang }
+
+// handleLanguage 处理 /language 命令，查看或切换语言。
+func (r *REPL) handleLanguage(arg string) {
+	if arg == "" {
+		fmt.Fprintf(r.out, "\n  当前语言: %s\n", r.lang)
+		fmt.Fprintln(r.out, "  支持: zh-CN (中文), en-US (English)")
+		fmt.Fprintln(r.out, "  用法: /language zh-CN 或 /language en-US")
+		return
+	}
+	lang := i18n.Parse(arg)
+	r.lang = lang
+	if lang == i18n.EnUS {
+		fmt.Fprintf(r.out, "\n  Language switched to: %s\n", lang)
+	} else {
+		fmt.Fprintf(r.out, "\n  语言已切换为: %s\n", lang)
+	}
 }
 
 // ---------------------------------------------------------------- 主循环
@@ -141,6 +220,7 @@ func (r *REPL) Run() error {
 		r.handleInput(input)
 	}
 	r.saveSession()
+	r.CloseMCP()
 	return nil
 }
 
@@ -151,6 +231,7 @@ var chineseCommands = map[string]string{
 	"上下文": "context", "工具": "tools", "权限": "permissions", "成本": "cost",
 	"会话": "sessions", "恢复": "resume", "新建": "new", "保存": "save", "撤销": "undo",
 	"流水线": "pipeline", "圆桌": "roundtable", "记忆": "memory",
+	"语言": "language",
 }
 
 func (r *REPL) handleInput(input string) {
@@ -206,6 +287,8 @@ func (r *REPL) handleInput(input string) {
 		r.undo()
 	case "cost":
 		r.printCost()
+	case "language", "lang":
+		r.handleLanguage(arg)
 	case "sessions":
 		r.listSessions()
 	case "resume":
@@ -1013,10 +1096,17 @@ func (r *REPL) undo() {
 }
 
 func (r *REPL) printCost() {
-	total := r.usage.prompt + r.usage.completion
-	fmt.Fprintf(r.out, "\n  本次会话: %d 轮模型调用，%s\n", r.usage.turns, bright(fmt.Sprintf("tokens %d in / %d out / 共 %d", r.usage.prompt, r.usage.completion, total)))
+	turns, prompt, completion, elapsed, provider, inputPrice, outputPrice, cost, hasPrice := r.CostInfo()
+	total := prompt + completion
+	fmt.Fprintf(r.out, "\n  本次会话: %d 轮模型调用，%s\n", turns, bright(fmt.Sprintf("tokens %d in / %d out / 共 %d", prompt, completion, total)))
 	fmt.Fprintf(r.out, "  本地估算当前上下文: %d tokens\n", r.contextTokens())
-	fmt.Fprintf(r.out, "  用时 %s，压缩 %d 次\n", time.Since(r.started).Round(time.Second), r.compacts)
+	fmt.Fprintf(r.out, "  用时 %s，压缩 %d 次\n", elapsed.Round(time.Second), r.compacts)
+	if hasPrice {
+		fmt.Fprintf(r.out, "  供应商 %s：输入 $%.4f/1K，输出 $%.4f/1K\n", provider, inputPrice, outputPrice)
+		fmt.Fprintf(r.out, "  估算花费: %s\n", bright(fmt.Sprintf("$%.6f", cost)))
+	} else if provider != "" {
+		fmt.Fprintf(r.out, "  供应商 %s：%s\n", provider, dim("未配置单价，无法估算花费。在 codecrew.json 中设置 input_price / output_price 即可"))
+	}
 	fmt.Fprintln(r.out, "  "+dim("供应商计费口径可能不同，此处仅作量级参考"))
 }
 
@@ -1218,6 +1308,27 @@ func (r *REPL) ContextStats() (used, limit int) {
 // CostStats 返回本次会话的成本统计。
 func (r *REPL) CostStats() (turns, prompt, completion int, elapsed time.Duration) {
 	return r.usage.turns, r.usage.prompt, r.usage.completion, time.Since(r.started)
+}
+
+// CostInfo 返回本次会话的成本信息，包含金钱估算。
+// 如果当前供应商未配置单价，cost 为 0 且 hasPrice 为 false。
+func (r *REPL) CostInfo() (turns, prompt, completion int, elapsed time.Duration, provider string, inputPrice, outputPrice, cost float64, hasPrice bool) {
+	turns, prompt, completion, elapsed = r.CostStats()
+	// 解析当前供应商
+	if r.cfg.Model != "" {
+		if p, _, err := r.cfg.Resolve(r.cfg.Model); err == nil {
+			// 从 spec 中解析供应商名称
+			name, _, _ := strings.Cut(r.cfg.Model, "/")
+			provider = name
+			inputPrice = p.InputPrice
+			outputPrice = p.OutputPrice
+			if inputPrice > 0 || outputPrice > 0 {
+				hasPrice = true
+				cost = float64(prompt)/1000.0*inputPrice + float64(completion)/1000.0*outputPrice
+			}
+		}
+	}
+	return
 }
 
 // CompactionCount 返回累计上下文压缩次数。

@@ -15,6 +15,20 @@ type Provider struct {
 	BaseURL string   `json:"base_url"`
 	APIKey  string   `json:"api_key"`
 	Models  []string `json:"models,omitempty"`
+	// InputPrice / OutputPrice 单位：美元 / 1K tokens，用于成本估算。
+	// 不填则该供应商不参与成本计算（显示为"未配置单价"）。
+	InputPrice  float64 `json:"input_price,omitempty"`
+	OutputPrice float64 `json:"output_price,omitempty"`
+}
+
+// MCPServer 描述一个 MCP（Model Context Protocol）服务器。
+type MCPServer struct {
+	// Command 是服务器可执行文件路径（如 "npx"、"python3"）。
+	Command string `json:"command"`
+	// Args 是启动参数（如 ["-y", "@modelcontextprotocol/server-filesystem", "/path"]）。
+	Args []string `json:"args,omitempty"`
+	// Disabled 为 true 时不启动该服务器。
+	Disabled bool `json:"disabled,omitempty"`
 }
 
 // Config 是 CodeCrew 的全部可配置项。
@@ -22,13 +36,17 @@ type Config struct {
 	// Model 形如 "供应商/模型名"，例如 deepseek/deepseek-chat。
 	Model     string              `json:"model,omitempty"`
 	Providers map[string]Provider `json:"providers,omitempty"`
+	// MCPServers 是 MCP 服务器配置，启动时自动连接并注册工具。
+	MCPServers map[string]MCPServer `json:"mcp_servers,omitempty"`
 	// WorkingDir 是工具读写的用户项目根目录，默认为进程当前目录。
 	WorkingDir       string            `json:"working_dir,omitempty"`
 	Permissions      map[string]string `json:"permissions,omitempty"`
 	MaxContextTokens int               `json:"max_context_tokens,omitempty"`
 	MaxToolRounds    int               `json:"max_tool_rounds,omitempty"`
 	Temperature      *float64          `json:"temperature,omitempty"`
-	Source           string            `json:"-"` // 实际加载到的文件，仅用于展示
+	// Language 是界面语言，支持 zh-CN / en-US，默认 zh-CN。
+	Language string `json:"language,omitempty"`
+	Source   string `json:"-"` // 实际加载到的文件，仅用于展示
 }
 
 func (c *Config) defaults() {
