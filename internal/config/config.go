@@ -60,6 +60,36 @@ func (c ReasoningConfig) GetInjectReflections() bool {
 	return *c.InjectReflections
 }
 
+// VerifyConfig 代码验证与自愈配置。
+type VerifyConfig struct {
+	// Enabled 是否启用验证功能，默认 true。
+	Enabled *bool `json:"enabled,omitempty"`
+	// AutoVerify 是否在代码修改后自动验证，默认 true。
+	AutoVerify *bool `json:"auto_verify,omitempty"`
+	// Commands 验证命令列表，按顺序执行。为空时自动检测。
+	Commands []string `json:"commands,omitempty"`
+	// MaxRepairRounds 最大修复轮数，默认 3。
+	MaxRepairRounds int `json:"max_repair_rounds,omitempty"`
+	// TimeoutSeconds 单个命令超时时间，默认 120 秒。
+	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
+}
+
+// GetEnabled 返回是否启用验证。
+func (c VerifyConfig) GetEnabled() bool {
+	if c.Enabled == nil {
+		return true
+	}
+	return *c.Enabled
+}
+
+// GetAutoVerify 返回是否自动验证。
+func (c VerifyConfig) GetAutoVerify() bool {
+	if c.AutoVerify == nil {
+		return true
+	}
+	return *c.AutoVerify
+}
+
 // Config 是 CodeCrew 的全部可配置项。
 type Config struct {
 	// Model 形如 "供应商/模型名"，例如 deepseek/deepseek-chat。
@@ -73,7 +103,9 @@ type Config struct {
 	Temperature      *float64          `json:"temperature,omitempty"`
 	// Reasoning 推理范式配置（standard / react / reflexion）。
 	Reasoning ReasoningConfig `json:"reasoning,omitempty"`
-	Source    string          `json:"-"` // 实际加载到的文件，仅用于展示
+	// Verify 代码验证与自愈配置。
+	Verify VerifyConfig `json:"verify,omitempty"`
+	Source string       `json:"-"` // 实际加载到的文件，仅用于展示
 }
 
 func (c *Config) defaults() {
@@ -203,6 +235,22 @@ func merge(dst, src *Config) {
 	}
 	if src.Reasoning.InjectReflections != nil {
 		dst.Reasoning.InjectReflections = src.Reasoning.InjectReflections
+	}
+	// 合并 Verify 配置
+	if src.Verify.Enabled != nil {
+		dst.Verify.Enabled = src.Verify.Enabled
+	}
+	if src.Verify.AutoVerify != nil {
+		dst.Verify.AutoVerify = src.Verify.AutoVerify
+	}
+	if len(src.Verify.Commands) > 0 {
+		dst.Verify.Commands = src.Verify.Commands
+	}
+	if src.Verify.MaxRepairRounds > 0 {
+		dst.Verify.MaxRepairRounds = src.Verify.MaxRepairRounds
+	}
+	if src.Verify.TimeoutSeconds > 0 {
+		dst.Verify.TimeoutSeconds = src.Verify.TimeoutSeconds
 	}
 }
 

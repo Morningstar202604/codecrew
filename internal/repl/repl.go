@@ -20,6 +20,7 @@ import (
 	"codecrew/internal/role"
 	"codecrew/internal/session"
 	"codecrew/internal/tool"
+	"codecrew/internal/verify"
 )
 
 // Options 是启动 REPL 所需的一切。
@@ -61,6 +62,9 @@ type REPL struct {
 	reflexion    *reasoning.ReflexionEngine // 反思引擎
 	failureStore *reasoning.FailureStore    // 失败经验存储
 	thoughts     []string                   // 当前轮的思考过程
+
+	verifyEngine *verify.Engine // 验证引擎
+	verifyCfg    verify.Config  // 验证配置
 }
 
 type usageTracker struct {
@@ -104,6 +108,8 @@ func New(cfg *config.Config, opt Options) (*REPL, error) {
 	r.client = r.buildClient()
 	// 初始化推理配置和失败存储（必须在创建 history 之前，这样 systemPromptFor 才能读取推理配置）
 	r.initReasoning()
+	// 初始化验证引擎
+	r.initVerify()
 	r.history = []llm.Message{llm.TextMessage("system", r.systemPromptFor(current))}
 
 	if store, err := session.DefaultStore(); err == nil {
@@ -252,6 +258,188 @@ func (r *REPL) handleFailures(arg string) {
 	fmt.Fprintln(r.out, "  用法: /failures clear 清空失败经验")
 }
 
+// initVerify 初始化验证引擎。
+func (r *REPL) initVerify() {
+	cfg := r.cfg.Verify
+	commands := cfg.Commands
+	if len(commands) == 0 {
+		// 自动检测项目类型
+		workingDir := r.cfg.WorkingDir
+		if workingDir == "" {
+			workingDir = "."
+		}
+		commands = verify.DetectCommands(workingDir)
+	}
+	r.verifyCfg = verify.Config{
+		Enabled:         cfg.GetEnabled(),
+		AutoVerify:      cfg.GetAutoVerify(),
+		Commands:        commands,
+		MaxRepairRounds: cfg.MaxRepairRounds,
+		TimeoutSeconds:  cfg.TimeoutSeconds,
+		WorkingDir:      r.cfg.WorkingDir,
+	}
+	if r.verifyCfg.Enabled {
+		r.verifyEngine = verify.NewEngine(r.verifyCfg)
+	}
+}
+
+// runVerify 执行验证，返回结果。
+func (r *REPL) runVerify(ctx context.Context) verify.Result {
+	if r.verifyEngine == nil {
+		return verify.Result{Passed: true, Total: 0}
+	}
+	fmt.Fprintf(r.out, "\n  %s\n", dim("🔍 正在验证代码..."))
+	result := r.verifyEngine.Run(ctx)
+	r.printVerifyResult(result)
+	return result
+}
+
+// printVerifyResult 打印验证结果。
+func (r *REPL) printVerifyResult(result verify.Result) {
+	if result.Total == 0 {
+		fmt.Fprintln(r.out, "  ⚠ 没有配置验证命令")
+		return
+	}
+	for _, c := range result.Commands {
+		if c.Passed {
+			fmt.Fprintf(r.out, "  %s %s (%s)\n", bright("✓"), c.Command, c.Duration.Round(time.Millisecond))
+		} else {
+			fmt.Fprintf(r.out, "  %s %s (%s)\n", bright("✗"), c.Command, c.Duration.Round(time.Millisecond))
+			// 显示错误摘要（前 5 行）
+			summary := verify.ExtractErrorSummary(c.Output, 5)
+			for _, line := range strings.Split(summary, "\n") {
+				if strings.TrimSpace(line) != "" {
+					fmt.Fprintf(r.out, "    %s\n", dim(line))
+				}
+			}
+		}
+	}
+	fmt.Fprintf(r.out, "  %s\n", result.Summary())
+}
+
+// autoVerifyAfterTool 在工具调用后自动验证（仅当修改了文件时）。
+func (r *REPL) autoVerifyAfterTool(ctx context.Context, toolName string) {
+	if !r.verifyCfg.AutoVerify || r.verifyEngine == nil {
+		return
+	}
+	// 只有 write 和 edit 工具会修改文件
+	if toolName != "write" && toolName != "edit" {
+		return
+	}
+	result := r.runVerify(ctx)
+	if !result.Passed {
+		// 验证失败，触发修复循环
+		r.repairLoop(ctx, result)
+	}
+}
+
+// repairLoop 修复循环：验证失败后，让模型分析错误并修复，再验证，直到通过或达到上限。
+func (r *REPL) repairLoop(ctx context.Context, initialResult verify.Result) verify.RepairResult {
+	maxRounds := r.verifyCfg.GetMaxRepairRounds()
+	result := verify.RepairResult{MaxRounds: maxRounds}
+	currentResult := initialResult
+
+	for round := 1; round <= maxRounds; round++ {
+		if currentResult.Passed {
+			result.Fixed = true
+			result.FinalResult = &currentResult
+			break
+		}
+
+		fmt.Fprintf(r.out, "\n  %s\n", dim(fmt.Sprintf("🔧 第 %d/%d 轮修复中...", round, maxRounds)))
+
+		// 构造修复 prompt
+		errors := currentResult.FailedOutput()
+		repairPrompt := verify.BuildRepairPrompt(errors, round, maxRounds)
+
+		// 将修复请求加入历史
+		r.history = append(r.history, llm.TextMessage("user", repairPrompt))
+
+		// 调用模型修复（使用 runTurn 的内部逻辑，但不触发新的自动验证）
+		text, calls, _, err := r.client.Chat(ctx, r.history, r.registry.Schemas(), func(delta string) {
+			fmt.Fprint(r.out, delta)
+		})
+		if err != nil {
+			fmt.Fprintf(r.out, "\n  ✗ 修复调用失败: %v\n", err)
+			result.Rounds = append(result.Rounds, verify.RepairRound{
+				Round: round, Fixed: false, Summary: "修复调用失败: " + err.Error(),
+			})
+			break
+		}
+		if text != "" {
+			fmt.Fprintln(r.out)
+		}
+
+		// 执行工具调用（修复代码）
+		if len(calls) > 0 {
+			if err := r.runToolCalls(ctx, calls); err != nil {
+				fmt.Fprintf(r.out, "  ✗ 修复工具执行失败: %v\n", err)
+			}
+		}
+
+		// 将模型回复加入历史
+		r.history = append(r.history, llm.Message{Role: "assistant", Content: text, ToolCalls: calls})
+
+		// 再次验证
+		fmt.Fprintf(r.out, "\n  %s\n", dim("🔍 重新验证..."))
+		currentResult = r.verifyEngine.Run(ctx)
+		r.printVerifyResult(currentResult)
+
+		result.Rounds = append(result.Rounds, verify.RepairRound{
+			Round:    round,
+			Fixed:    currentResult.Passed,
+			Summary:  text,
+			ErrorOut: currentResult.FailedOutput(),
+		})
+
+		if currentResult.Passed {
+			result.Fixed = true
+			result.FinalResult = &currentResult
+			break
+		}
+	}
+
+	// 打印修复结果
+	fmt.Fprintln(r.out)
+	if result.Fixed {
+		fmt.Fprintf(r.out, "  %s\n", bright(result.Summary()))
+	} else {
+		fmt.Fprintf(r.out, "  %s\n", result.Summary())
+		fmt.Fprintln(r.out, "  建议：手动检查错误，或增加 max_repair_rounds")
+	}
+
+	return result
+}
+
+// handleVerify 处理 /verify 命令。
+func (r *REPL) handleVerify(arg string) {
+	if r.verifyEngine == nil {
+		fmt.Fprintln(r.out, "\n  ⚠ 验证功能未启用")
+		return
+	}
+	if arg == "config" {
+		fmt.Fprintf(r.out, "\n  验证配置:\n")
+		fmt.Fprintf(r.out, "    启用: %v\n", r.verifyCfg.Enabled)
+		fmt.Fprintf(r.out, "    自动验证: %v\n", r.verifyCfg.AutoVerify)
+		fmt.Fprintf(r.out, "    最大修复轮数: %d\n", r.verifyCfg.GetMaxRepairRounds())
+		fmt.Fprintf(r.out, "    验证命令:\n")
+		for _, cmd := range r.verifyCfg.Commands {
+			fmt.Fprintf(r.out, "      - %s\n", cmd)
+		}
+		return
+	}
+	if arg == "repair" {
+		// 手动触发验证+修复
+		result := r.runVerify(context.Background())
+		if !result.Passed {
+			r.repairLoop(context.Background(), result)
+		}
+		return
+	}
+	// 默认：只验证不修复
+	r.runVerify(context.Background())
+}
+
 func findPlanner(reg *tool.Registry) *tool.PlanTool {
 	if t, ok := reg.Get("plan"); ok {
 		if p, ok := t.(*tool.PlanTool); ok {
@@ -353,6 +541,8 @@ func (r *REPL) handleInput(input string) {
 		r.handleReasoning(arg)
 	case "failures":
 		r.handleFailures(arg)
+	case "verify":
+		r.handleVerify(arg)
 	case "sessions":
 		r.listSessions()
 	case "resume":
@@ -542,6 +732,8 @@ func (r *REPL) runToolCalls(ctx context.Context, calls []llm.ToolCall) error {
 			fmt.Fprintf(r.out, "     %s\n", dim("→ "+disp.Truncate(preview, 100)))
 		}
 		r.feedBack(call, result, false)
+		// 工具执行后自动验证（仅当修改了文件时）
+		r.autoVerifyAfterTool(ctx, call.Function.Name)
 	}
 	return nil
 }
@@ -885,6 +1077,7 @@ func (r *REPL) reload() {
 	r.applyRole(r.current)
 	r.client = r.buildClient()
 	r.initReasoning()
+	r.initVerify()
 	r.printReloaded()
 }
 

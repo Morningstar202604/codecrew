@@ -60,5 +60,14 @@
     "auto_reflect": true,
     "reflection_depth": 1,
     "inject_reflections": true
+  },
+
+  "//verify": "代码验证与自愈：代码修改后自动运行验证命令(编译/测试/lint)，失败时自动分析错误并修复，多轮循环直到通过。commands 留空时自动检测项目类型",
+  "verify": {
+    "enabled": true,
+    "auto_verify": true,
+    "commands": [],
+    "max_repair_rounds": 3,
+    "timeout_seconds": 120
   }
 }
