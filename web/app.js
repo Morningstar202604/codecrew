@@ -19,11 +19,56 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-function showToast(msg, type = '') {
-  const toast = $('#toast');
-  toast.textContent = msg;
-  toast.className = 'toast show ' + type;
-  setTimeout(() => { toast.className = 'toast ' + type; }, 2500);
+// Toast 图标映射
+const TOAST_ICONS = {
+  success: '✓',
+  error: '✕',
+  info: 'ℹ',
+  warning: '⚠',
+};
+
+function showToast(msg, type = 'info', duration = 3000) {
+  // 确保 toast 容器存在
+  let container = $('.toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+  }
+
+  const toast = document.createElement('div');
+  toast.className = 'toast ' + type;
+  
+  const icon = document.createElement('span');
+  icon.className = 'toast-icon';
+  icon.textContent = TOAST_ICONS[type] || TOAST_ICONS.info;
+  
+  const message = document.createElement('span');
+  message.className = 'toast-message';
+  message.textContent = msg;
+  
+  const closeBtn = document.createElement('span');
+  closeBtn.className = 'toast-close';
+  closeBtn.textContent = '×';
+  closeBtn.onclick = () => dismissToast(toast);
+  
+  toast.appendChild(icon);
+  toast.appendChild(message);
+  toast.appendChild(closeBtn);
+  container.appendChild(toast);
+  
+  // 自动消失
+  const timer = setTimeout(() => dismissToast(toast), duration);
+  toast.dataset.timer = timer;
+  
+  return toast;
+}
+
+function dismissToast(toast) {
+  if (!toast || toast.classList.contains('hide')) return;
+  clearTimeout(toast.dataset.timer);
+  toast.classList.add('hide');
+  setTimeout(() => toast.remove(), 300);
 }
 
 function formatTime(iso) {
@@ -35,6 +80,23 @@ function formatTime(iso) {
 }
 
 // ---------- API 调用 ----------
+// API 配置
+const API_CONFIG = {
+  timeout: 30000,      // 30 秒超时
+  maxRetries: 2,       // 最多重试 2 次
+  retryDelay: 1000,    // 重试间隔 1 秒
+};
+
+// 带超时的 fetch
+function fetchWithTimeout(url, options, timeout) {
+  return Promise.race([
+    fetch(url, options),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('请求超时，请检查网络连接')), timeout)
+    ),
+  ]);
+}
+
 async function api(path, options = {}) {
   const opts = {
     headers: { 'Content-Type': 'application/json' },
@@ -43,12 +105,37 @@ async function api(path, options = {}) {
   if (opts.body && typeof opts.body === 'object') {
     opts.body = JSON.stringify(opts.body);
   }
-  const res = await fetch(path, opts);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(data.error || `HTTP ${res.status}`);
+
+  let lastError;
+  for (let attempt = 0; attempt <= API_CONFIG.maxRetries; attempt++) {
+    try {
+      const res = await fetchWithTimeout(path, opts, API_CONFIG.timeout);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // 4xx 错误不重试
+        if (res.status >= 400 && res.status < 500) {
+          throw new Error(data.error || `请求失败 (${res.status})`);
+        }
+        throw new Error(data.error || `服务器错误 (${res.status})`);
+      }
+      return data;
+    } catch (err) {
+      lastError = err;
+      // 超时或 5xx 错误才重试
+      if (attempt < API_CONFIG.maxRetries && 
+          (err.message.includes('超时') || err.message.includes('5'))) {
+        await new Promise(r => setTimeout(r, API_CONFIG.retryDelay * (attempt + 1)));
+        continue;
+      }
+      break;
+    }
   }
-  return data;
+
+  // 全局错误提示
+  if (lastError && !options.silent) {
+    showToast(lastError.message, 'error');
+  }
+  throw lastError;
 }
 
 // SSE 流式对话
@@ -162,7 +249,25 @@ function addMessage(role, content) {
 
   const roleLabel = document.createElement('div');
   roleLabel.className = 'message-role';
-  roleLabel.textContent = role === 'user' ? '你' : state.currentRole;
+  const roleName = document.createElement('span');
+  roleName.textContent = role === 'user' ? '你' : state.currentRole;
+  roleLabel.appendChild(roleName);
+  
+  // 角色徽章
+  if (role !== 'user') {
+    const badge = document.createElement('span');
+    badge.className = 'role-badge';
+    badge.textContent = getRoleDisplayName(state.currentRole);
+    roleLabel.appendChild(badge);
+  }
+  
+  // 时间戳
+  const time = document.createElement('span');
+  time.style.marginLeft = 'auto';
+  time.style.color = 'var(--text-muted)';
+  time.style.fontSize = '11px';
+  time.textContent = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  roleLabel.appendChild(time);
 
   const contentEl = document.createElement('div');
   contentEl.className = 'message-content';
@@ -173,8 +278,22 @@ function addMessage(role, content) {
   msg.appendChild(avatar);
   msg.appendChild(body);
   messages.appendChild(msg);
-  scrollToBottom();
+  
+  // 平滑滚动到底部
+  requestAnimationFrame(() => scrollToBottom());
   return msg;
+}
+
+// 获取角色显示名称
+function getRoleDisplayName(role) {
+  const names = {
+    developer: '开发',
+    reviewer: '审查',
+    architect: '架构',
+    tester: '测试',
+    docs: '文档',
+  };
+  return names[role] || role;
 }
 
 function renderMessageContent(el, text) {
@@ -332,6 +451,44 @@ async function refreshRoles() {
   } catch (e) {}
 }
 
+
+
+// 导出配置
+async function exportConfig() {
+  try {
+    const data = await api('/api/config?session=' + state.sessionId);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'codecrew-config.json';
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('配置已导出', 'success');
+  } catch (err) {
+    // 错误已由 api 函数处理
+  }
+}
+
+// 导入配置
+async function importConfig() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const text = await file.text();
+    try {
+      JSON.parse(text);
+      // 这里可以调用 API 导入配置，目前只做展示
+      showToast('配置文件已读取（导入功能需后端支持）', 'info');
+    } catch {
+      showToast('无效的 JSON 配置文件', 'error');
+    }
+  };
+  input.click();
+}
 async function refreshModel() {
   try {
     const data = await api('/api/model?session=' + encodeURIComponent(state.sessionId || ''));
@@ -655,6 +812,48 @@ function bindEvents() {
   $('#memoryClearBtn').onclick = clearMemory;
   $('#memoryRoleSelector').onchange = refreshMemory;
 
+  // 推理范式
+  $$('.mode-btn').forEach(btn => {
+    btn.onclick = () => setReasoningMode(btn.dataset.mode);
+  });
+  $('#clearFailuresBtn').onclick = async () => {
+    await api('/api/failures?session=' + state.sessionId, { method: 'POST', body: { action: 'clear' } });
+    showToast('失败经验已清空', 'success');
+    refreshFailures();
+  };
+
+  // 验证
+  $('#runVerifyBtn').onclick = () => runVerify(false);
+  $('#runVerifyRepairBtn').onclick = () => runVerify(true);
+
+  // 索引
+  $('#buildIndexBtn').onclick = buildIndex;
+  $('#codeSearchBtn').onclick = searchCode;
+  $('#codeSearchInput').addEventListener('keydown', e => { if (e.key === 'Enter') searchCode(); });
+
+  // Supervisor
+  $('#supervisorOnBtn').onclick = () => supervisorAction('on');
+  $('#supervisorOffBtn').onclick = () => supervisorAction('off');
+  $('#assignTaskBtn').onclick = () => {
+    const worker = $('#supervisorWorkerSelect').value;
+    const task = $('#supervisorTaskInput').value.trim();
+    if (!task) { showToast('请输入任务描述', 'error'); return; }
+    supervisorAction('assign', worker, task);
+    $('#supervisorTaskInput').value = '';
+    showToast('任务已分配', 'success');
+  };
+  // 任务完成按钮（事件委托）
+  document.addEventListener('click', e => {
+    if (e.target.classList.contains('task-done-btn')) {
+      const id = parseInt(e.target.dataset.id);
+      const result = e.target.dataset.result || '已完成';
+      supervisorAction('done', null, null, id, result);
+    }
+  });
+
+  // 评估
+  $('#runEvalBtn').onclick = runEval;
+
   // 统计刷新
   $('#refreshStatsBtn').onclick = refreshStats;
 
@@ -676,6 +875,203 @@ function sendMessage() {
   input.style.height = 'auto';
   input.blur(); // 移动端收起键盘
   streamChat(msg);
+}
+
+// ---------- 推理范式 ----------
+async function refreshReasoning() {
+  try {
+    const data = await api('/api/reasoning?session=' + state.sessionId);
+    $('#currentReasoningMode').textContent = data.mode;
+    $('#showThoughts').textContent = data.show_thoughts;
+    $('#autoReflect').textContent = data.auto_reflect;
+    // 更新按钮状态
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.mode === data.mode);
+    });
+  } catch (e) { console.error('refreshReasoning:', e); }
+}
+
+async function setReasoningMode(mode) {
+  try {
+    await api('/api/reasoning?session=' + state.sessionId, {
+      method: 'POST',
+      body: { mode }
+    });
+    showToast('推理模式已切换为: ' + mode, 'success');
+    refreshReasoning();
+  } catch (e) {
+    showToast('切换失败: ' + e.message, 'error');
+  }
+}
+
+async function refreshFailures() {
+  try {
+    const data = await api('/api/failures?session=' + state.sessionId);
+    const list = $('#failuresList');
+    if (!data.failures || data.failures.length === 0) {
+      list.innerHTML = '<div class="empty-state">暂无失败经验</div>';
+      return;
+    }
+    list.innerHTML = data.failures.slice(0, 10).map(f => `
+      <div class="failure-item">
+        <div class="failure-task">${escapeHtml(f.task || '')}</div>
+        <div class="failure-error">${escapeHtml(f.error || '')}</div>
+        <div class="failure-time">${f.timestamp || ''}</div>
+      </div>
+    `).join('');
+  } catch (e) { console.error('refreshFailures:', e); }
+}
+
+// ---------- 验证与自愈 ----------
+async function runVerify(withRepair) {
+  try {
+    $('#verifyResult').innerHTML = '<div class="loading">正在验证...</div>';
+    const result = await api('/api/verify?session=' + state.sessionId, {
+      method: 'POST',
+      body: { action: withRepair ? 'repair' : 'run' }
+    });
+    let html = `<div class="verify-summary ${result.passed ? 'success' : 'error'}">
+      ${result.passed ? '✓' : '✗'} ${result.passed ? '全部验证通过' : result.failed_count + '/' + result.total + ' 项失败'}
+    </div>`;
+    if (result.commands) {
+      html += '<div class="verify-commands">';
+      result.commands.forEach(c => {
+        html += `<div class="verify-command ${c.passed ? 'passed' : 'failed'}">
+          <span>${c.passed ? '✓' : '✗'}</span>
+          <span class="cmd-name">${escapeHtml(c.command)}</span>
+          <span class="cmd-duration">${c.duration_ms}ms</span>
+        </div>`;
+        if (!c.passed && c.output) {
+          html += `<pre class="cmd-output">${escapeHtml(c.output.substring(0, 500))}</pre>`;
+        }
+      });
+      html += '</div>';
+    }
+    $('#verifyResult').innerHTML = html;
+  } catch (e) {
+    $('#verifyResult').innerHTML = '<div class="error">验证失败: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+// ---------- 代码库索引 ----------
+async function refreshIndex() {
+  try {
+    const data = await api('/api/index?session=' + state.sessionId);
+    if (data.enabled) {
+      $('#indexFileCount').textContent = data.file_count;
+      $('#indexSymbolCount').textContent = data.symbol_count;
+      $('#indexUpdatedAt').textContent = data.updated_at ? new Date(data.updated_at).toLocaleString() : '-';
+    }
+  } catch (e) { console.error('refreshIndex:', e); }
+}
+
+async function buildIndex() {
+  try {
+    await api('/api/index/build?session=' + state.sessionId, { method: 'POST' });
+    showToast('正在构建索引...', 'success');
+    setTimeout(refreshIndex, 3000);
+  } catch (e) {
+    showToast('构建失败: ' + e.message, 'error');
+  }
+}
+
+async function searchCode() {
+  const query = $('#codeSearchInput').value.trim();
+  if (!query) { showToast('请输入搜索关键词', 'error'); return; }
+  try {
+    const data = await api('/api/index/search?q=' + encodeURIComponent(query) + '&session=' + state.sessionId);
+    const results = data.results || [];
+    if (results.length === 0) {
+      $('#codeSearchResults').innerHTML = '<div class="empty-state">没有找到匹配的结果</div>';
+      return;
+    }
+    $('#codeSearchResults').innerHTML = results.map(r => `
+      <div class="search-result-item">
+        <div class="result-header">
+          <span class="result-file">${escapeHtml(r.file)}</span>
+          <span class="result-line">:${r.line}</span>
+          <span class="result-score">相关性: ${r.score.toFixed(2)}</span>
+        </div>
+        <pre class="result-content">${escapeHtml(r.content)}</pre>
+      </div>
+    `).join('');
+  } catch (e) {
+    showToast('搜索失败: ' + e.message, 'error');
+  }
+}
+
+// ---------- Supervisor 编排 ----------
+async function refreshSupervisor() {
+  try {
+    const data = await api('/api/supervisor?session=' + state.sessionId);
+    $('#supervisorEnabled').textContent = data.enabled ? '开启' : '关闭';
+    if (data.progress) {
+      $('#supervisorProgress').textContent = data.progress.done + '/' + data.progress.total;
+    }
+    // 任务列表
+    const tasksEl = $('#supervisorTasks');
+    if (data.tasks && data.tasks.length > 0) {
+      tasksEl.innerHTML = data.tasks.map(t => `
+        <div class="task-item ${t.status}">
+          <span class="task-status">${t.status === 'done' ? '✓' : t.status === 'running' ? '▶' : '○'}</span>
+          <span class="task-worker">[${t.worker}]</span>
+          <span class="task-title">${escapeHtml(t.task)}</span>
+          ${t.result ? `<button class="task-done-btn" data-id="${t.id}" data-result="${escapeHtml(t.result)}">完成</button>` : `<button class="task-done-btn" data-id="${t.id}">标记完成</button>`}
+        </div>
+      `).join('');
+    } else {
+      tasksEl.innerHTML = '<div class="empty-state">暂无任务</div>';
+    }
+  } catch (e) { console.error('refreshSupervisor:', e); }
+}
+
+async function supervisorAction(action, worker, task, id, result) {
+  try {
+    await api('/api/supervisor?session=' + state.sessionId, {
+      method: 'POST',
+      body: { action, worker, task, id, result }
+    });
+    refreshSupervisor();
+  } catch (e) {
+    showToast('操作失败: ' + e.message, 'error');
+  }
+}
+
+// ---------- 评估 ----------
+async function runEval() {
+  try {
+    $('#evalResult').innerHTML = '<div class="loading">正在运行评估...</div>';
+    await api('/api/eval?session=' + state.sessionId, { method: 'POST' });
+    showToast('评估正在运行，完成后刷新查看', 'success');
+    setTimeout(refreshEvalReports, 10000);
+  } catch (e) {
+    $('#evalResult').innerHTML = '<div class="error">评估失败: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+async function refreshEvalReports() {
+  try {
+    const data = await api('/api/eval?session=' + state.sessionId);
+    const reports = data.reports || [];
+    const el = $('#evalReports');
+    if (reports.length === 0) {
+      el.innerHTML = '<div class="empty-state">暂无评估报告</div>';
+      return;
+    }
+    el.innerHTML = reports.slice(0, 5).map(r => `
+      <div class="eval-report-item">
+        <div class="report-header">
+          <span class="report-name">${escapeHtml(r.name)}</span>
+          <span class="report-time">${new Date(r.started_at).toLocaleString()}</span>
+        </div>
+        <div class="report-stats">
+          <span>通过率: ${r.pass_rate?.toFixed(1)}%</span>
+          <span>得分: ${r.total_score}/${r.max_score}</span>
+          <span>用时: ${r.duration_ms}ms</span>
+        </div>
+      </div>
+    `).join('');
+  } catch (e) { console.error('refreshEvalReports:', e); }
 }
 
 // ---------- 初始化 ----------
