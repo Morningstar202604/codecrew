@@ -3,7 +3,6 @@
 </p>
 
 # CodeCrew — 你的 AI 开发团队
-<p align="center"><img src="docs/logo.svg" alt="CodeCrew Logo" width="200" height="60" /></p>`n`n# CodeCrew — 你的 AI 开发团队
 
 > 像指挥一个开发团队一样指挥 AI —— 有分工、有流程、有质检。
 > 终端原生、多角色协作、权限可控的 AI 编程助手。
