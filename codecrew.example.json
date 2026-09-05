@@ -1,12 +1,14 @@
 {
-  "//": "复制为 codecrew.json 后填入自己的密钥；codecrew.json 已在 .gitignore 中，不会被提交",
+  "//": "复制为 codecrew.json 后填入自己的密钥；codecrew.json 已在 .gitignore 中，不会被提交。input_price/output_price 单位：美元/1K tokens，用于 /cost 成本估算，不填则不显示花费",
   "model": "deepseek/deepseek-chat",
 
   "providers": {
     "deepseek": {
       "base_url": "https://api.deepseek.com",
       "api_key": "sk-在这里填你的DeepSeek密钥",
-      "models": ["deepseek-chat", "deepseek-reasoner"]
+      "models": ["deepseek-chat", "deepseek-reasoner"],
+      "input_price": 0.0014,
+      "output_price": 0.0028
     },
     "qwen": {
       "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -89,5 +91,17 @@
     "context_lines": 3,
     "inject_episodic": true,
     "episodic_count": 5
+  "//mcp": "MCP(Model Context Protocol)服务器：启动时自动连接并注册工具，工具名加 mcp_ 前缀，默认 ask 权限。command 是可执行文件，args 是启动参数，disabled=true 时不启动",
+  "mcp_servers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allow"],
+      "disabled": true
+    },
+    "fetch": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-fetch"],
+      "disabled": true
+    }
   }
 }

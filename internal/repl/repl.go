@@ -14,8 +14,10 @@ import (
 	"codecrew/internal/config"
 	"codecrew/internal/disp"
 	"codecrew/internal/eval"
+	"codecrew/internal/i18n"
 	"codecrew/internal/knowledge"
 	"codecrew/internal/llm"
+	"codecrew/internal/mcp"
 	"codecrew/internal/memory"
 	"codecrew/internal/orchestration"
 	"codecrew/internal/planner"
@@ -81,7 +83,9 @@ type REPL struct {
 	hitlState       *orchestration.HITLState       // Human-in-the-Loop 状态
 	evalHarness     *eval.Harness                  // 评估框架
 
-	cmdHistory []string // 命令历史
+	cmdHistory []string      // 命令历史
+	mcpClients []*mcp.Client // MCP 服务器客户端，关闭时清理
+	lang       i18n.Language // 界面语言
 }
 
 type usageTracker struct {
@@ -124,6 +128,8 @@ func New(cfg *config.Config, opt Options) (*REPL, error) {
 	r.plan = findPlanner(r.registry)
 	r.applyRole(current)
 	r.client = r.buildClient()
+	r.lang = i18n.Parse(cfg.Language)
+	r.connectMCPServers()
 	// 初始化推理配置和失败存储（必须在创建 history 之前，这样 systemPromptFor 才能读取推理配置）
 	r.initReasoning()
 	// 初始化验证引擎
@@ -318,6 +324,8 @@ func (r *REPL) handleInput(input string) {
 		r.handleFailures(arg)
 	case "verify":
 		r.handleVerify(arg)
+	case "language", "lang":
+		r.handleLanguage(arg)
 	case "sessions":
 		r.listSessions()
 	case "resume":
@@ -617,4 +625,70 @@ func configHint(cfg *config.Config) string {
 		"2. 编辑 codecrew.json，填入 base_url / api_key",
 		"3. 回到这里执行 /reload（或设置 CREW_BASE_URL / CREW_API_KEY / CREW_MODEL）",
 	}, "\n")
+}
+
+// connectMCPServers 连接配置中的 MCP 服务器并注册其工具。
+func (r *REPL) connectMCPServers() {
+	if len(r.cfg.MCPServers) == 0 {
+		return
+	}
+	for name, srv := range r.cfg.MCPServers {
+		if srv.Disabled || srv.Command == "" {
+			continue
+		}
+		client, err := mcp.NewClient(srv.Command, srv.Args...)
+		if err != nil {
+			fmt.Fprintf(r.out, "  ⚠ MCP 服务器 %q 连接失败: %v\n", name, err)
+			continue
+		}
+		tools, err := client.ListTools()
+		if err != nil {
+			fmt.Fprintf(r.out, "  ⚠ MCP 服务器 %q 获取工具列表失败: %v\n", name, err)
+			client.Close()
+			continue
+		}
+		for _, t := range tools {
+			adapter := mcp.NewToolAdapter(client, t)
+			r.registry.Register(adapter, tool.DecisionAsk)
+		}
+		r.mcpClients = append(r.mcpClients, client)
+		fmt.Fprintf(r.out, "  ✓ MCP 服务器 %q (%s v%s)：注册 %d 个工具\n",
+			name, client.ServerName(), client.ServerVersion(), len(tools))
+	}
+}
+
+// CloseMCP 关闭所有 MCP 服务器连接。
+func (r *REPL) CloseMCP() {
+	for _, c := range r.mcpClients {
+		c.Close()
+	}
+	r.mcpClients = nil
+}
+
+// T 返回当前语言的翻译。args 可选，用于格式化。
+func (r *REPL) T(key string, args ...any) string {
+	return i18n.T(r.lang, key, args...)
+}
+
+// Language 返回当前界面语言。
+func (r *REPL) Language() i18n.Language { return r.lang }
+
+// SetLanguage 设置界面语言。
+func (r *REPL) SetLanguage(lang i18n.Language) { r.lang = lang }
+
+// handleLanguage 处理 /language 命令，查看或切换语言。
+func (r *REPL) handleLanguage(arg string) {
+	if arg == "" {
+		fmt.Fprintf(r.out, "\n  当前语言: %s\n", r.lang)
+		fmt.Fprintln(r.out, "  支持: zh-CN (中文), en-US (English)")
+		fmt.Fprintln(r.out, "  用法: /language zh-CN 或 /language en-US")
+		return
+	}
+	lang := i18n.Parse(arg)
+	r.lang = lang
+	if lang == i18n.EnUS {
+		fmt.Fprintf(r.out, "\n  Language switched to: %s\n", lang)
+	} else {
+		fmt.Fprintf(r.out, "\n  语言已切换为: %s\n", lang)
+	}
 }
