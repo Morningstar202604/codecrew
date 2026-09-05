@@ -19,6 +19,9 @@ import (
 	"codecrew/internal/repl"
 )
 
+// version 由构建时注入，默认值用于开发模式。
+var version = "dev"
+
 // Server 是 HTTP 服务主体，管理多个 Web 会话。
 type Server struct {
 	cfg      *config.Config
@@ -123,6 +126,20 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/permissions/allow", s.handlePermissionAllow)
 	mux.HandleFunc("/api/history/clear", s.handleHistoryClear)
 	mux.HandleFunc("/api/history/undo", s.handleHistoryUndo)
+	// 推理范式
+	mux.HandleFunc("/api/reasoning", s.handleReasoning)
+	mux.HandleFunc("/api/failures", s.handleFailures)
+	// 验证与自愈
+	mux.HandleFunc("/api/verify", s.handleVerify)
+	// 代码库索引
+	mux.HandleFunc("/api/index", s.handleIndex)
+	mux.HandleFunc("/api/index/build", s.handleIndexBuild)
+	mux.HandleFunc("/api/index/search", s.handleIndexSearch)
+	// 编排与评估
+	mux.HandleFunc("/api/supervisor", s.handleSupervisor)
+	mux.HandleFunc("/api/approve", s.handleApprove)
+	mux.HandleFunc("/api/deny", s.handleDeny)
+	mux.HandleFunc("/api/eval", s.handleEval)
 	mux.HandleFunc("/", s.handleFrontend)
 
 	return mux

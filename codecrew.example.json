@@ -55,6 +55,42 @@
   "//working_dir": "可选：工具读写与命令执行的根目录，默认取当前目录，也可用 --cwd 或 CREW_WORKING_DIR 指定",
   "working_dir": "",
 
+  "//reasoning": "推理范式：standard(标准)/react(显式ReAct)/reflexion(自我反思)。reflexion 模式下任务完成后自动反思，失败时深度反思，经验存入角色记忆库",
+  "reasoning": {
+    "mode": "standard",
+    "show_thoughts": true,
+    "auto_reflect": true,
+    "reflection_depth": 1,
+    "inject_reflections": true
+  },
+
+  "//verify": "代码验证与自愈：代码修改后自动运行验证命令(编译/测试/lint)，失败时自动分析错误并修复，多轮循环直到通过。commands 留空时自动检测项目类型",
+  "verify": {
+    "enabled": true,
+    "auto_verify": true,
+    "commands": [],
+    "max_repair_rounds": 3,
+    "timeout_seconds": 120
+  },
+
+  "//planner": "规划与执行分离：复杂任务先分解为有依赖关系的子任务(DAG)，再按顺序逐步执行，失败时自动调整计划。用 /plan on 开启，/plan <目标> 手动触发",
+  "planner": {
+    "enabled": false,
+    "auto_plan": false,
+    "max_tasks": 8,
+    "auto_adjust": true,
+    "max_adjust_rounds": 2
+  },
+
+  "//knowledge": "记忆与知识增强：代码库索引+BM25语义检索+情景记忆。启动时自动索引项目，模型可通过 search_code 工具搜索代码，最近任务自动注入 system prompt",
+  "knowledge": {
+    "enabled": true,
+    "auto_index": true,
+    "index_interval": 24,
+    "max_results": 10,
+    "context_lines": 3,
+    "inject_episodic": true,
+    "episodic_count": 5
   "//mcp": "MCP(Model Context Protocol)服务器：启动时自动连接并注册工具，工具名加 mcp_ 前缀，默认 ask 权限。command 是可执行文件，args 是启动参数，disabled=true 时不启动",
   "mcp_servers": {
     "filesystem": {

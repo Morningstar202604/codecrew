@@ -2,6 +2,54 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与语义化版本。
 
+## v1.0.6 — 2026-09-01
+
+工程质量优化版本：大文件拆分、统一错误处理、lint/覆盖率配置、前端快捷键、文档完善。
+
+### 新增
+- **统一错误处理包 `internal/errors`**：25 个错误码、AppError 结构体、20+ 快捷构造函数，支持 errors.Is/As
+- **golangci-lint 配置**：18 个 linter 启用，errcheck/gosimple/govet/staticcheck 等
+- **Makefile**：build/test/vet/fmt/lint/coverage/serve 等 10 个目标
+- **CI 覆盖率工作流**：自动生成 coverage.out 并上传 artifact
+- **前端快捷键支持**：Ctrl+Enter 发送、Ctrl+L 清空、Ctrl+K 面板、Ctrl+1~5 切换角色、Esc 关闭
+- **FEATURES.md 功能文档**：514 行完整功能文档，覆盖所有模块用法、配置、API、命令速查
+
+### 优化
+- **repl.go 拆分**：从 2525 行拆分为 5 个文件（repl.go 621/integrations.go 749/commands.go 606/api.go 255/helpers.go 347）
+- **handlers.go 拆分**：从 678 行拆分为 4 个文件（handlers.go 128/handlers_core.go 327/handlers_memory.go 239/handlers_advanced.go 263）
+- **config.go 拆分**：从 584 行拆分为 4 个文件（config.go 222/config_modules.go 175/config_resolve.go 136/config_helpers.go 76）
+- **版本号硬编码优化**：server 包使用 version 变量，构建时可注入
+- **README.md 全面更新**：核心特性表新增 7 项、命令一览新增 10 项、架构图更新、路线图更新
+
+### 质量
+- 代码总量：Go 14203 行 + 前端 3110 行 + 文档 1078 行
+- 17 个 internal 包，最大文件 749 行
+- 37+ 个单元测试用例（6 个新增模块全覆盖）
+- `gofmt` / `go vet` / `go test -race` 全绿
+
+## v1.0.5 — 2026-09-01
+
+Agent 技术栈全面补齐版本：推理范式、验证自愈、规划执行、知识记忆、编排评估五大能力全部上线，前后端一一对应。
+
+### 新增
+- **推理范式增强 `/reasoning`**：standard / react / reflexion 三种模式，ReAct 显式化（Thought → Action → Observation），Reflexion 自我反思，失败经验积累（`/failures`），反思深度 1-3 可配
+- **验证与自愈循环 `/verify`**：代码修改后自动运行验证命令（编译/测试/lint），失败时自动分析修复，多轮循环直到通过，支持自动检测项目类型
+- **规划与执行分离 `/plan`**：复杂任务先分解为 DAG 子任务，按依赖顺序逐步执行，失败时自动调整计划，支持手动分配任务
+- **记忆与知识增强 `/index`**：代码库索引（多语言符号提取）、BM25 语义检索、情景记忆（自动注入 system prompt），`search_code` 工具让模型可搜索代码库
+- **编排与评估 `/supervisor` `/eval`**：Supervisor 多角色编排（任务分配/进度跟踪）、Human-in-the-Loop 人工审批（`/approve` `/deny`）、Eval Harness 能力评估框架（5 类测试用例，历史报告持久化）
+- **Web 端全面补全**：新增 12 个 API 端点 + 6 个功能面板（推理/验证/索引/编排/评估/失败经验），后端功能前端全部可按钮管理
+- **新增 6 个模块**：`internal/reasoning`、`internal/verify`、`internal/planner`、`internal/knowledge`、`internal/orchestration`、`internal/eval`
+
+### 修复
+- `config.merge` 缺少嵌套配置字段合并（reasoning/verify/planner/knowledge）
+- `knowledge/index.go` 库代码中直接 fmt.Printf，改为调用方获取统计信息
+- 中文别名和帮助文本补充新命令
+
+### 质量
+- 代码总量从 ~5500 行增长到 ~15000 行（Go 12785 行 + 前端 2476 行）
+- `gofmt` / `go vet` / `go test -race` 全绿
+- 前后端功能一一对应，CLI 命令完整
+
 ## v0.2.0 — 2026-09-01
 团队化协作版本：流水线编排、圆桌讨论、角色长期记忆、变更 diff 预览。
 

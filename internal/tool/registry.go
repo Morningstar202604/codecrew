@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"codecrew/internal/llm"
 )
@@ -49,10 +51,18 @@ type Registry struct {
 	tools     map[string]Tool
 	order     []string
 	roleAllow map[string]bool
-	modes     map[string]Decision // 来自配置：tool -> allow/ask/deny
-	defaults  map[string]Decision // 工具自带的默认档位
-	approver  Approver            // 交互确认，nil 表示按配置放行
-	approved  map[string]bool     // 本次会话已确认过的工具
+	modes     map[string]Decision   // 来自配置：tool -> allow/ask/deny
+	defaults  map[string]Decision   // 工具自带的默认档位
+	approver  Approver              // 交互确认，nil 表示按配置放行
+	approved  map[string]bool       // 本次会话已确认过的工具
+	mu        sync.RWMutex          // 缓存锁
+	cache     map[string]cacheEntry // 工具结果缓存
+}
+
+type cacheEntry struct {
+	result    string
+	timestamp time.Time
+	ttl       time.Duration
 }
 
 // NewRegistry 创建空注册表。
@@ -63,6 +73,7 @@ func NewRegistry() *Registry {
 		modes:     map[string]Decision{},
 		defaults:  map[string]Decision{},
 		approved:  map[string]bool{},
+		cache:     map[string]cacheEntry{},
 	}
 }
 
@@ -306,4 +317,44 @@ func pipeSource(field string) bool {
 		return true
 	}
 	return strings.HasPrefix(field, "http://") || strings.HasPrefix(field, "https://")
+}
+
+// cacheKey 生成缓存键。
+func cacheKey(toolName string, args map[string]any) string {
+	data, _ := json.Marshal(args)
+	return toolName + ":" + string(data)
+}
+
+// GetCached 获取缓存结果。
+func (r *Registry) GetCached(toolName string, args map[string]any) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	key := cacheKey(toolName, args)
+	entry, ok := r.cache[key]
+	if !ok {
+		return "", false
+	}
+	if time.Since(entry.timestamp) > entry.ttl {
+		return "", false
+	}
+	return entry.result, true
+}
+
+// SetCached 设置缓存结果。
+func (r *Registry) SetCached(toolName string, args map[string]any, result string, ttl time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := cacheKey(toolName, args)
+	r.cache[key] = cacheEntry{
+		result:    result,
+		timestamp: time.Now(),
+		ttl:       ttl,
+	}
+}
+
+// ClearCache 清空缓存。
+func (r *Registry) ClearCache() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cache = map[string]cacheEntry{}
 }

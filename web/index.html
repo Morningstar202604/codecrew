@@ -2,6 +2,8 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="apple-touch-icon" href="/favicon.svg">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
 <title>CodeCrew — AI 开发工作台</title>
 <link rel="stylesheet" href="/style.css">
@@ -122,6 +124,11 @@
     <button class="panel-tab active" data-tab="tools">工具</button>
     <button class="panel-tab" data-tab="memory">记忆</button>
     <button class="panel-tab" data-tab="plan">计划</button>
+    <button class="panel-tab" data-tab="reasoning">推理</button>
+    <button class="panel-tab" data-tab="verify">验证</button>
+    <button class="panel-tab" data-tab="index">索引</button>
+    <button class="panel-tab" data-tab="supervisor">编排</button>
+    <button class="panel-tab" data-tab="eval">评估</button>
     <button class="panel-tab" data-tab="config">配置</button>
     <button class="panel-tab" data-tab="stats">统计</button>
   </div>
@@ -174,6 +181,103 @@
     </div>
 
     <!-- 配置 -->
+    <!-- 推理面板 -->
+    <div class="panel-pane" id="pane-reasoning">
+      <div class="pane-section">
+        <h4>推理模式</h4>
+        <div class="reasoning-modes">
+          <button class="mode-btn active" data-mode="standard">标准</button>
+          <button class="mode-btn" data-mode="react">ReAct</button>
+          <button class="mode-btn" data-mode="reflexion">反思</button>
+        </div>
+        <div class="reasoning-status" id="reasoningStatus">
+          <span>当前: <strong id="currentReasoningMode">standard</strong></span>
+          <span>显示思考: <strong id="showThoughts">true</strong></span>
+          <span>自动反思: <strong id="autoReflect">true</strong></span>
+        </div>
+      </div>
+      <div class="pane-section">
+        <h4>失败经验</h4>
+        <div class="failures-list" id="failuresList">暂无失败经验</div>
+        <button class="danger-btn" id="clearFailuresBtn" style="margin-top:8px">清空失败经验</button>
+      </div>
+    </div>
+
+    <!-- 验证面板 -->
+    <div class="panel-pane" id="pane-verify">
+      <div class="pane-section">
+        <h4>代码验证</h4>
+        <div class="verify-actions">
+          <button class="primary-btn" id="runVerifyBtn">运行验证</button>
+          <button class="primary-btn" id="runVerifyRepairBtn">验证并修复</button>
+        </div>
+        <div class="verify-result" id="verifyResult">点击按钮运行验证</div>
+      </div>
+    </div>
+
+    <!-- 索引面板 -->
+    <div class="panel-pane" id="pane-index">
+      <div class="pane-section">
+        <h4>代码库索引</h4>
+        <div class="index-status" id="indexStatus">
+          <span>文件数: <strong id="indexFileCount">-</strong></span>
+          <span>符号数: <strong id="indexSymbolCount">-</strong></span>
+          <span>更新时间: <strong id="indexUpdatedAt">-</strong></span>
+        </div>
+        <button class="primary-btn" id="buildIndexBtn" style="margin-top:8px">重建索引</button>
+      </div>
+      <div class="pane-section">
+        <h4>代码搜索</h4>
+        <input type="text" id="codeSearchInput" placeholder="搜索代码..." class="search-input">
+        <button class="primary-btn" id="codeSearchBtn" style="margin-top:8px">搜索</button>
+        <div class="search-results" id="codeSearchResults" style="margin-top:12px"></div>
+      </div>
+    </div>
+
+    <!-- 编排面板 -->
+    <div class="panel-pane" id="pane-supervisor">
+      <div class="pane-section">
+        <h4>Supervisor 模式</h4>
+        <div class="supervisor-actions">
+          <button class="primary-btn" id="supervisorOnBtn">开启</button>
+          <button class="danger-btn" id="supervisorOffBtn">关闭</button>
+        </div>
+        <div class="supervisor-status" id="supervisorStatus">
+          <span>状态: <strong id="supervisorEnabled">关闭</strong></span>
+          <span>进度: <strong id="supervisorProgress">-</strong></span>
+        </div>
+      </div>
+      <div class="pane-section">
+        <h4>任务分配</h4>
+        <select id="supervisorWorkerSelect" class="role-selector">
+          <option value="architect">架构师</option>
+          <option value="developer">开发者</option>
+          <option value="reviewer">审查者</option>
+          <option value="tester">测试者</option>
+        </select>
+        <input type="text" id="supervisorTaskInput" placeholder="任务描述..." class="search-input" style="margin-top:8px">
+        <button class="primary-btn" id="assignTaskBtn" style="margin-top:8px">分配任务</button>
+        <div class="supervisor-tasks" id="supervisorTasks" style="margin-top:12px">暂无任务</div>
+      </div>
+      <div class="pane-section">
+        <h4>待审批操作</h4>
+        <div class="pending-approvals" id="pendingApprovals">暂无待审批</div>
+      </div>
+    </div>
+
+    <!-- 评估面板 -->
+    <div class="panel-pane" id="pane-eval">
+      <div class="pane-section">
+        <h4>能力评估</h4>
+        <button class="primary-btn" id="runEvalBtn">运行评估</button>
+        <div class="eval-result" id="evalResult" style="margin-top:12px">点击按钮运行评估</div>
+      </div>
+      <div class="pane-section">
+        <h4>历史报告</h4>
+        <div class="eval-reports" id="evalReports">暂无报告</div>
+      </div>
+    </div>
+
     <div class="panel-pane" id="pane-config">
       <div class="pane-section">
         <div class="pane-label">模型配置</div>

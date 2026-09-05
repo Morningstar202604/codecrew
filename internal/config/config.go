@@ -5,9 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
-	"strconv"
-	"strings"
 )
 
 // Provider 描述一个 OpenAI 兼容的上游。
@@ -44,9 +41,15 @@ type Config struct {
 	MaxContextTokens int               `json:"max_context_tokens,omitempty"`
 	MaxToolRounds    int               `json:"max_tool_rounds,omitempty"`
 	Temperature      *float64          `json:"temperature,omitempty"`
+	// Reasoning 推理范式配置（standard / react / reflexion）。
+	Reasoning ReasoningConfig `json:"reasoning,omitempty"`
+	// Verify 代码验证与自愈配置。
+	Verify    VerifyConfig    `json:"verify,omitempty"`
+	Planner   PlannerConfig   `json:"planner,omitempty"`
+	Knowledge KnowledgeConfig `json:"knowledge,omitempty"`
+	Source    string          `json:"-"` // 实际加载到的文件，仅用于展示
 	// Language 是界面语言，支持 zh-CN / en-US，默认 zh-CN。
 	Language string `json:"language,omitempty"`
-	Source   string `json:"-"` // 实际加载到的文件，仅用于展示
 }
 
 func (c *Config) defaults() {
@@ -62,6 +65,7 @@ func (c *Config) defaults() {
 }
 
 // Paths 返回配置候选路径，按优先级从高到低；explicit 非空时只用它。
+
 func Paths(baseDir, explicit string) []string {
 	if explicit != "" {
 		return []string{explicit}
@@ -161,197 +165,76 @@ func merge(dst, src *Config) {
 	if src.Temperature != nil {
 		dst.Temperature = src.Temperature
 	}
+	// 合并 Reasoning 配置
+	if src.Reasoning.Mode != "" {
+		dst.Reasoning.Mode = src.Reasoning.Mode
+	}
+	if src.Reasoning.ShowThoughts != nil {
+		dst.Reasoning.ShowThoughts = src.Reasoning.ShowThoughts
+	}
+	if src.Reasoning.AutoReflect != nil {
+		dst.Reasoning.AutoReflect = src.Reasoning.AutoReflect
+	}
+	if src.Reasoning.ReflectionDepth > 0 {
+		dst.Reasoning.ReflectionDepth = src.Reasoning.ReflectionDepth
+	}
+	if src.Reasoning.InjectReflections != nil {
+		dst.Reasoning.InjectReflections = src.Reasoning.InjectReflections
+	}
+	// 合并 Verify 配置
+	if src.Verify.Enabled != nil {
+		dst.Verify.Enabled = src.Verify.Enabled
+	}
+	if src.Verify.AutoVerify != nil {
+		dst.Verify.AutoVerify = src.Verify.AutoVerify
+	}
+	if len(src.Verify.Commands) > 0 {
+		dst.Verify.Commands = src.Verify.Commands
+	}
+	if src.Verify.MaxRepairRounds > 0 {
+		dst.Verify.MaxRepairRounds = src.Verify.MaxRepairRounds
+	}
+	if src.Verify.TimeoutSeconds > 0 {
+		dst.Verify.TimeoutSeconds = src.Verify.TimeoutSeconds
+	}
+	// 合并 Planner 配置
+	if src.Planner.Enabled != nil {
+		dst.Planner.Enabled = src.Planner.Enabled
+	}
+	if src.Planner.AutoPlan != nil {
+		dst.Planner.AutoPlan = src.Planner.AutoPlan
+	}
+	if src.Planner.MaxTasks > 0 {
+		dst.Planner.MaxTasks = src.Planner.MaxTasks
+	}
+	if src.Planner.AutoAdjust != nil {
+		dst.Planner.AutoAdjust = src.Planner.AutoAdjust
+	}
+	if src.Planner.MaxAdjustRounds > 0 {
+		dst.Planner.MaxAdjustRounds = src.Planner.MaxAdjustRounds
+	}
+	// 合并 Knowledge 配置
+	if src.Knowledge.Enabled != nil {
+		dst.Knowledge.Enabled = src.Knowledge.Enabled
+	}
+	if src.Knowledge.AutoIndex != nil {
+		dst.Knowledge.AutoIndex = src.Knowledge.AutoIndex
+	}
+	if src.Knowledge.IndexInterval > 0 {
+		dst.Knowledge.IndexInterval = src.Knowledge.IndexInterval
+	}
+	if src.Knowledge.MaxResults > 0 {
+		dst.Knowledge.MaxResults = src.Knowledge.MaxResults
+	}
+	if src.Knowledge.ContextLines > 0 {
+		dst.Knowledge.ContextLines = src.Knowledge.ContextLines
+	}
+	if src.Knowledge.InjectEpisodic != nil {
+		dst.Knowledge.InjectEpisodic = src.Knowledge.InjectEpisodic
+	}
+	if src.Knowledge.EpisodicCount > 0 {
+		dst.Knowledge.EpisodicCount = src.Knowledge.EpisodicCount
+	}
 }
 
 // applyEnv 支持 CREW_* 环境变量兜底，键存在才生效。
-func applyEnv(cfg *Config) {
-	baseURL := os.Getenv("CREW_BASE_URL")
-	apiKey := os.Getenv("CREW_API_KEY")
-	model := os.Getenv("CREW_MODEL")
-	if baseURL != "" || apiKey != "" || model != "" {
-		if cfg.Providers == nil {
-			cfg.Providers = map[string]Provider{}
-		}
-		provider := cfg.Providers["env"]
-		provider.BaseURL = firstNonEmpty(provider.BaseURL, baseURL, "https://api.deepseek.com")
-		provider.APIKey = firstNonEmpty(provider.APIKey, apiKey)
-		custom := model
-		if custom != "" {
-			if strings.Contains(custom, "/") {
-				// 用户指定了完整的 供应商/模型名，直接使用
-				if cfg.Model == "" {
-					cfg.Model = custom
-				}
-			} else {
-				// 只有模型名，当作 env 供应商的模型
-				if !contains(provider.Models, custom) {
-					provider.Models = append([]string{custom}, provider.Models...)
-				}
-				if cfg.Model == "" {
-					cfg.Model = "env/" + custom
-				}
-			}
-		}
-		cfg.Providers["env"] = provider
-	}
-	if wd := os.Getenv("CREW_WORKING_DIR"); wd != "" && cfg.WorkingDir == "" {
-		cfg.WorkingDir = wd
-	}
-	if v := os.Getenv("CREW_MAX_CONTEXT_TOKENS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			cfg.MaxContextTokens = n
-		}
-	}
-	if v := os.Getenv("CREW_DEFAULT_PERMISSION"); v != "" {
-		cfg.Permissions = setPermission(cfg.Permissions, "*", v)
-	}
-}
-
-func setPermission(m map[string]string, key, value string) map[string]string {
-	if m == nil {
-		m = map[string]string{}
-	}
-	m[key] = value
-	return m
-}
-
-// Empty 表示没有任何可用供应商。
-func (c *Config) Empty() bool { return len(c.Providers) == 0 }
-
-// Resolve 把 "供应商/模型名" 解析为具体的 Provider 与模型 ID。
-func (c *Config) Resolve(spec string) (Provider, string, error) {
-	if spec == "" {
-		return Provider{}, "", fmt.Errorf("未指定模型")
-	}
-	name, modelID, found := strings.Cut(spec, "/")
-	if !found {
-		if len(c.Providers) == 1 {
-			for _, provider := range c.Providers {
-				return provider, spec, nil
-			}
-		}
-		return Provider{}, "", fmt.Errorf("模型格式应为 供应商/模型名，例如 deepseek/deepseek-chat；当前供应商: %v", c.ProviderNames())
-	}
-	provider, ok := c.Providers[name]
-	if !ok {
-		return Provider{}, "", fmt.Errorf("未知供应商 %q，已配置: %v", name, c.ProviderNames())
-	}
-	if provider.BaseURL == "" {
-		return Provider{}, "", fmt.Errorf("供应商 %q 缺少 base_url", name)
-	}
-	if modelID == "" {
-		return Provider{}, "", fmt.Errorf("供应商 %q 缺少模型名，例如 %s/deepseek-chat", name, name)
-	}
-	return provider, modelID, nil
-}
-
-// ModelSpecs 返回全部 "供应商/模型名" 组合；未声明 models 时用模型名占位。
-func (c *Config) ModelSpecs() []string {
-	var specs []string
-	for _, name := range c.ProviderNames() {
-		for _, m := range c.Providers[name].Models {
-			specs = append(specs, name+"/"+m)
-		}
-	}
-	return specs
-}
-
-// ProviderNames 返回排序后的供应商名。
-func (c *Config) ProviderNames() []string {
-	names := make([]string, 0, len(c.Providers))
-	for name := range c.Providers {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
-
-// PermissionFor 查询某工具的权限档位（allow/ask/deny），"*" 为通配兜底。
-func (c *Config) PermissionFor(tool string) string {
-	if v, ok := c.Permissions[tool]; ok {
-		return normalizePermission(v)
-	}
-	if v, ok := c.Permissions["*"]; ok {
-		return normalizePermission(v)
-	}
-	return ""
-}
-
-func normalizePermission(v string) string {
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "allow", "true", "y", "auto":
-		return "allow"
-	case "deny", "block", "off", "never":
-		return "deny"
-	default:
-		return "ask"
-	}
-}
-
-// MaskKey 对密钥脱敏，便于打印。
-func MaskKey(key string) string {
-	switch {
-	case key == "":
-		return "(未填写)"
-	case len(key) <= 10:
-		return key[:2] + "****"
-	default:
-		return key[:6] + "****" + key[len(key)-4:]
-	}
-}
-
-// WorkDir 返回工具使用的工作目录（用户项目根），默认当前目录。
-func (c *Config) WorkDir() string {
-	if c.WorkingDir == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			return "."
-		}
-		return wd
-	}
-	abs, err := filepath.Abs(c.WorkingDir)
-	if err != nil {
-		return c.WorkingDir
-	}
-	return abs
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-// stripComments 去掉 JSON 中的 // 行注释（便于配置模板加说明），字符串内的 // 会被保留。
-func stripComments(data []byte) []byte {
-	out := make([]byte, 0, len(data))
-	for _, line := range strings.Split(string(data), "\n") {
-		out = append(out, []byte(stripLineComment(line))...)
-		out = append(out, '\n')
-	}
-	return out
-}
-
-func stripLineComment(line string) string {
-	inString := false
-	escaped := false
-	for i := 0; i < len(line); i++ {
-		c := line[i]
-		if escaped {
-			escaped = false
-			continue
-		}
-		switch {
-		case inString && c == '\\':
-			escaped = true
-		case c == '"':
-			inString = !inString
-		case !inString && c == '/' && i+1 < len(line) && line[i+1] == '/':
-			return strings.TrimRight(line[:i], " \t")
-		}
-	}
-	return line
-}

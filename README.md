@@ -1,3 +1,8 @@
+<p align="center">
+  <img src="assets/logo.svg" alt="CodeCrew" width="120" height="120" style="border-radius:24px"/>
+</p>
+
+# CodeCrew — 你的 AI 开发团队
 <p align="center"><img src="docs/logo.svg" alt="CodeCrew Logo" width="200" height="60" /></p>`n`n# CodeCrew — 你的 AI 开发团队
 
 > 像指挥一个开发团队一样指挥 AI —— 有分工、有流程、有质检。
@@ -22,6 +27,12 @@ CodeCrew 是一个单文件 Go 程序：把 OpenAI 兼容的任意模型（DeepS
 | **上下文自治** | token 预算可视、超限自动摘要压缩历史，长任务不再撑爆窗口                      |
 | **会话持久化** | 每次对话落盘 JSONL，`/sessions`、`/resume`、`--session` 断点续聊             |
 | **配置即代码** | 项目级 `codecrew.json` > 全局 `~/.codecrew/config.json` > 环境变量，热重载   |
+| **推理范式增强** | standard / react / reflexion / cot 四种推理模式，ReAct 显式化，Reflexion 自我反思，失败经验自动积累 |
+| **验证与自愈** | 代码修改后自动运行验证命令，失败时自动分析修复，多轮循环直到通过，支持自动检测项目类型 |
+| **规划与执行** | 复杂任务先分解为 DAG 子任务，按依赖顺序逐步执行，失败时自动调整计划 |
+| **记忆与知识** | 代码库索引（多语言符号提取）、BM25 语义检索、情景记忆，模型可搜索代码库 |
+| **编排与评估** | Supervisor 多角色编排、Human-in-the-Loop 人工审批、Eval Harness 能力评估框架 |
+| **Web 工作台** | 完整 Web 界面，10 个功能面板，桌面端/移动端自适应，SSE 流式输出 |
 | **终端原生**   | 单二进制、零第三方依赖、跨平台（Linux / macOS / Windows），中英混排对齐       |
 
 ---
