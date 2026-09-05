@@ -90,7 +90,7 @@
     "max_results": 10,
     "context_lines": 3,
     "inject_episodic": true,
-    "episodic_count": 5
+    "episodic_count": 5,
   "//mcp": "MCP(Model Context Protocol)服务器：启动时自动连接并注册工具，工具名加 mcp_ 前缀，默认 ask 权限。command 是可执行文件，args 是启动参数，disabled=true 时不启动",
   "mcp_servers": {
     "filesystem": {
