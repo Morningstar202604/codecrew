@@ -14,7 +14,7 @@ import (
 )
 
 // version 由构建时 -ldflags "-X main.version=vX.Y.Z" 注入。
-var version = "v1.0.6"
+var version = "v0.4.0"
 
 func main() {
 	var (

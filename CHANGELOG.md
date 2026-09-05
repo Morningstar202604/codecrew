@@ -2,6 +2,12 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与语义化版本。
 
+## [0.4.0] - 2026-09-05
+### Changed
+- repl.go 上帝文件拆分为模块（helpers/commands/integrations 等），提升可维护性；
+- 推理能力（ReAct/Reflexion/失败经验存储）随 v0.2.x 合并完整落地；
+- 新增 MCP 服务器接入与多语言（i18n）支持。
+
 ## v1.0.6 — 2026-09-01
 
 工程质量优化版本：大文件拆分、统一错误处理、lint/覆盖率配置、前端快捷键、文档完善。
